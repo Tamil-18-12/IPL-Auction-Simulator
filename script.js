@@ -1,4 +1,19 @@
 // ======================================================
+// 🔧 0. PERSISTENT IDENTITY (THE WRISTBAND)
+// ======================================================
+// This ensures that if a user refreshes, they keep the same ID.
+let myPersistentId = localStorage.getItem("ipl_auction_player_id");
+
+if (!myPersistentId) {
+  // Generate a random unique ID if one doesn't exist
+  myPersistentId =
+    "user_" + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+  localStorage.setItem("ipl_auction_player_id", myPersistentId);
+}
+
+console.log("🔑 My Persistent ID:", myPersistentId);
+
+// ======================================================
 // 🔧 1. ROBUST SOCKET INITIALIZATION
 // ======================================================
 
@@ -8,6 +23,10 @@ const socket = io({
   reconnectionAttempts: Infinity,
   reconnectionDelay: 2000,
   timeout: 20000,
+  // SEND THE ID TO THE SERVER ON CONNECT
+  auth: {
+    playerId: myPersistentId,
+  },
 });
 
 const lobbyScreen = document.getElementById("lobbyScreen");
@@ -44,7 +63,7 @@ setInterval(() => {
   fetch(window.location.href)
     .then(() => console.log("✅ Keep-Alive: HTTP Ping Sent"))
     .catch(() => console.log("⚠️ Keep-Alive: HTTP Ping Failed"));
-}, 120000); 
+}, 120000);
 
 // --- SOCKET STATUS HANDLERS ---
 socket.on("connect", () => {
@@ -67,6 +86,12 @@ socket.on("reconnect", () => {
   // Ask server to sync auction state again
   if (myRoomId) {
     socket.emit("request_sync");
+    // Also try to reclaim team based on persistent ID logic which server will handle
+    // But we also keep the local storage backup for safety
+    const savedTeamKey = localStorage.getItem(`ipl_team_${myRoomId}`);
+    if (savedTeamKey) {
+      socket.emit("reclaim_team", savedTeamKey);
+    }
   }
 });
 
@@ -268,6 +293,7 @@ const PLAYER_DATABASE = {
   "R Sai Kishore": { bat: 25, bowl: 84, luck: 82, type: "bowl" },
   "Suyash Sharma": { bat: 5, bowl: 84, luck: 80, type: "bowl" },
   "Manimaran Siddharth": { bat: 10, bowl: 80, luck: 75, type: "bowl" },
+
   // Add more specific stats here if needed
 };
 
@@ -497,7 +523,6 @@ const RAW_DATA = {
 const PLAYER_IMAGE_MAP = {
   "David Warner":
     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRy2UoIz9RctCjtDw0iTDr9W8lq_jMqGo0JpQ&s",
-
   "Virat Kohli":
     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSXd7IOQ0NKyGMznUdvuNfPqT1PjyLLWs2PlA&s",
   "rohit sharma":
@@ -743,6 +768,7 @@ const PLAYER_IMAGE_MAP = {
     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQgVBnKUGvBQjHnNvaw_A9lKO7c6MwP2EqHlQ&s",
   "Josh Inglis":
     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ96_gVuW8JTbxirRPH9mVAjB59jbtQRt6UtQ&s",
+
   // Add other images
 };
 
@@ -796,6 +822,7 @@ function parsePrice(text) {
 
 function logEvent(message, highlight = false) {
   const logEl = document.getElementById("log");
+  if (!logEl) return;
   const div = document.createElement("div");
   div.className = highlight ? "text-warning mb-1" : "mb-1";
   div.innerHTML = `<span class="text-secondary me-2">[${new Date().toLocaleTimeString(
@@ -880,6 +907,8 @@ socket.on("room_joined", (data) => {
   if (isAdmin) {
     document.body.classList.add("is-admin");
     document.getElementById("waitingText").style.display = "none";
+    // 🔧 NEW: NOTIFY ADMIN THAT THEY ARE BACK
+    logEvent("✅ Admin privileges restored via IP check.", true);
   } else {
     document.body.classList.remove("is-admin");
     document.getElementById("startBtn").style.display = "none";
@@ -891,10 +920,12 @@ socket.on("room_joined", (data) => {
     connectedUsersCount = data.lobbyState.userCount;
     document.getElementById("joinedCount").innerText = connectedUsersCount;
 
+    // Check localStorage first for visual consistency
     const savedTeamKey = localStorage.getItem(`ipl_team_${data.roomId}`);
     if (savedTeamKey) {
       socket.emit("reclaim_team", savedTeamKey);
     } else {
+      // If server recognizes us via Auth ID, it might already assign us
       const myTeam = globalTeams.find((t) => t.ownerSocketId === socket.id);
       if (myTeam) mySelectedTeamKey = myTeam.bidKey;
     }
@@ -1010,7 +1041,6 @@ function initLobbyState() {
     "RR",
     "KKR",
     "PBKS",
-    
   ];
   for (let i = 0; i < count; i++) {
     const defName =
@@ -1114,6 +1144,8 @@ socket.on("team_claim_success", (key) => {
   mySelectedTeamKey = key;
   if (myRoomId) localStorage.setItem(`ipl_team_${myRoomId}`, key);
   renderLobbyTeams();
+  // 🔧 NEW: VISUAL FEEDBACK FOR TEAM RESTORE
+  logEvent("✅ Team ownership restored successfully!", true);
 });
 
 function buildAuctionQueue() {
