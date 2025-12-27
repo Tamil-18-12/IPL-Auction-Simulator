@@ -1,10 +1,9 @@
 /**
- * IPL AUCTION SERVER - FINAL PRODUCTION READY
- * FEATURES:
- * 1. Robust Host Recovery
- * 2. Keep-Alive Heartbeat
- * 3. Full AI Simulation Engine
- * 4. HOST APPROVAL RECLAIM SYSTEM (New)
+ * IPL AUCTION SERVER - FINAL PRODUCTION READY (FIXED)
+ * FIXES:
+ * 1. Fixed 'r is undefined' crash in end_auction_trigger
+ * 2. Added NRR safety check (prevent NaN)
+ * 3. Added logging for simulation steps
  */
 
 const express = require("express");
@@ -440,7 +439,8 @@ io.on("connection", (socket) => {
 
   socket.on("end_auction_trigger", () => {
     const roomId = getRoomId(socket);
-    if (isAdmin(socket)) {
+    const r = rooms[roomId]; // <--- FIX: Added 'r' definition here
+    if (isAdmin(socket) && r) {
       stopTimer(roomId);
       r.state.isActive = false;
       io.to(roomId).emit("open_squad_selection");
@@ -463,7 +463,10 @@ io.on("connection", (socket) => {
   socket.on("run_simulation", () => {
     const roomId = getRoomId(socket);
     const r = rooms[roomId];
-    if (r && isAdmin(socket)) runSimulationLogic(roomId, r);
+    if (r && isAdmin(socket)) {
+      console.log("Starting Simulation for Room:", roomId);
+      runSimulationLogic(roomId, r);
+    }
   });
 
   socket.on("disconnect", () => {
@@ -486,6 +489,7 @@ function runSimulationLogic(roomId, r) {
     .map((t) => {
       const squadData = r.squads[t.bidKey];
       let p11 = squadData ? squadData.playing11 : [];
+      // Auto-fill if not submitted
       if (p11.length < 11 && t.roster.length >= 11) p11 = t.roster.slice(0, 11);
 
       return {
@@ -502,8 +506,13 @@ function runSimulationLogic(roomId, r) {
       .emit("simulation_error", "Need at least 2 teams with 11 players!");
   }
 
-  const results = runAdvancedSimulation(tourneyTeams);
-  io.to(roomId).emit("tournament_results", results);
+  try {
+    const results = runAdvancedSimulation(tourneyTeams);
+    io.to(roomId).emit("tournament_results", results);
+  } catch (e) {
+    console.error("Simulation Error:", e);
+    io.to(roomId).emit("simulation_error", "Server Logic Error: " + e.message);
+  }
 }
 
 function runAdvancedSimulation(teams) {
@@ -511,6 +520,7 @@ function runAdvancedSimulation(teams) {
   const leagueMatches = [];
   const playoffs = [];
 
+  // Initialize stats
   teams.forEach((t) => {
     t.stats = {
       p: 0,
@@ -538,7 +548,8 @@ function runAdvancedSimulation(teams) {
   });
 
   function getStat(name) {
-    return stats[name] || { runs: 0, wkts: 0, pts: 0 };
+    // Fallback to prevent crash if stats missing
+    return stats[name] || { runs: 0, wkts: 0, pts: 0, fours: 0, sixes: 0 };
   }
 
   function simulateInnings(batTeam, bowlTeam, target) {
@@ -556,6 +567,7 @@ function runAdvancedSimulation(teams) {
       skill: (p.stats?.bat || 50) + (Math.random() * 10 - 5),
     }));
 
+    // Select Bowlers (Bottom 6 players usually)
     let bowlingCard = bowlTeam.playing11.slice(5).map((p) => ({
       name: p.name,
       runs: 0,
@@ -563,6 +575,8 @@ function runAdvancedSimulation(teams) {
       balls: 0,
       skill: (p.stats?.bowl || 50) + (Math.random() * 10 - 5),
     }));
+
+    // If not enough bowlers, take from top
     if (bowlingCard.length < 5) {
       bowlTeam.playing11.slice(0, 5).forEach((p) => {
         if (bowlingCard.length < 5)
@@ -721,36 +735,50 @@ function runAdvancedSimulation(teams) {
     };
   }
 
+  // --- LEAGUE STAGE ---
   for (let i = 0; i < teams.length; i++) {
     for (let j = i + 1; j < teams.length; j++) {
       leagueMatches.push(playMatch(teams[i], teams[j], "League"));
     }
   }
 
+  // --- NRR CALCULATION (Safety Check) ---
   teams.forEach((t) => {
     if (t.stats.oversFaced > 0 && t.stats.oversBowled > 0) {
       t.stats.nrr =
         t.stats.runsScored / t.stats.oversFaced -
         t.stats.runsConceded / t.stats.oversBowled;
+    } else {
+      t.stats.nrr = 0; // Prevent NaN
     }
   });
+
+  // Sort by Points, then NRR
   teams.sort((a, b) => b.stats.pts - a.stats.pts || b.stats.nrr - a.stats.nrr);
 
+  // --- PLAYOFFS ---
   let champion = teams[0].name,
     runner = teams[1].name;
+
   if (teams.length >= 4) {
     const q1 = playMatch(teams[0], teams[1], "Qualifier 1");
     const elim = playMatch(teams[2], teams[3], "Eliminator");
+
     const tQ2_1 = q1.winnerName === teams[0].name ? teams[1] : teams[0];
     const tQ2_2 = elim.winnerName === teams[2].name ? teams[2] : teams[3];
+
     const q2 = playMatch(tQ2_1, tQ2_2, "Qualifier 2");
+
     const tFin_1 = teams.find((t) => t.name === q1.winnerName);
     const tFin_2 = teams.find((t) => t.name === q2.winnerName);
+
     const final = playMatch(tFin_1, tFin_2, "FINAL");
+
     playoffs.push(q1, elim, q2, final);
     champion = final.winnerName;
     runner = final.winnerName === tFin_1.name ? tFin_2.name : tFin_1.name;
   } else {
+    // Fallback for fewer than 4 teams
     const final = playMatch(teams[0], teams[1], "FINAL");
     playoffs.push(final);
     champion = final.winnerName;
@@ -758,6 +786,7 @@ function runAdvancedSimulation(teams) {
   }
 
   const allStatsValues = Object.values(stats);
+
   return {
     winner: champion,
     runnerUp: runner,
@@ -765,9 +794,18 @@ function runAdvancedSimulation(teams) {
     leagueMatches,
     playoffs,
     allTeamsData: teams,
-    orangeCap: allStatsValues.sort((a, b) => b.runs - a.runs)[0],
-    purpleCap: allStatsValues.sort((a, b) => b.wkts - a.wkts)[0],
-    mvp: allStatsValues.sort((a, b) => b.pts - a.pts)[0],
+    orangeCap: allStatsValues.sort((a, b) => b.runs - a.runs)[0] || {
+      name: "-",
+      runs: 0,
+    },
+    purpleCap: allStatsValues.sort((a, b) => b.wkts - a.wkts)[0] || {
+      name: "-",
+      wkts: 0,
+    },
+    mvp: allStatsValues.sort((a, b) => b.pts - a.pts)[0] || {
+      name: "-",
+      pts: 0,
+    },
   };
 }
 
