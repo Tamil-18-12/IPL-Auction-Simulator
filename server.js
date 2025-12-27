@@ -1,59 +1,30 @@
 /**
- * IPL AUCTION SERVER - FINAL PRODUCTION READY (Render Compatible)
+ * IPL AUCTION SERVER - FINAL PRODUCTION READY
  * FEATURES:
- * 1. Fixed "Not Bid" Error (Auto-repairs socket ID on bid)
- * 2. Robust Host Recovery (IP-based Admin restoration)
- * 3. Keep-Alive Heartbeat (Prevents sleep)
- * 4. Full AI Simulation Engine
+ * 1. Robust Host Recovery
+ * 2. Keep-Alive Heartbeat
+ * 3. Full AI Simulation Engine
+ * 4. HOST APPROVAL RECLAIM SYSTEM (New)
  */
 
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
-const os = require("os");
-const axios = require("axios");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-const AUCTION_TIMER_SECONDS = 10;
-const PORT = process.env.PORT || 3001; // Render dynamic port support
-
-// --- SERVE HTML ---
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "ipl.html"));
+const io = new Server(server, {
+  cors: { origin: "*" },
+  pingTimeout: 60000,
 });
 
-// --- SERVE STATIC FILES ---
+const AUCTION_TIMER_SECONDS = 10;
+const PORT = process.env.PORT || 3001;
+
+// --- SERVE FILES ---
 app.use(express.static(__dirname));
-app.use(express.raw({ type: "audio/wav", limit: "10mb" }));
-
-// --- ROBUST IP GETTER (Crucial for Render) ---
-function getClientIp(socket) {
-  const header = socket.handshake.headers["x-forwarded-for"];
-  if (header) {
-    // Render sends multiple IPs. We need the first one (Real Client IP)
-    const ip = header.split(",")[0].trim();
-    if (ip.startsWith("::ffff:")) return ip.substr(7);
-    return ip;
-  }
-  const ip = socket.handshake.address;
-  if (ip && ip.startsWith("::ffff:")) return ip.substr(7);
-  return ip;
-}
-
-// --- GLOBAL STATE ---
-const rooms = {};
-
-// --- KEEP ALIVE LOGIC ---
-setInterval(() => {
-  const roomCount = Object.keys(rooms).length;
-  if (roomCount > 0) {
-    console.log(`[Heartbeat] Active Rooms: ${roomCount} | Memory alive.`);
-  }
-}, 60000); // Logs every 1 minute
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "ipl.html")));
 
 // --- UTILS ---
 function getRoomId(socket) {
@@ -66,6 +37,9 @@ function isAdmin(socket) {
   return r && r.adminSocketId === socket.id;
 }
 
+// --- GLOBAL STATE ---
+const rooms = {};
+
 // --- TIMER LOGIC ---
 function startTimer(roomId) {
   const r = rooms[roomId];
@@ -75,15 +49,15 @@ function startTimer(roomId) {
   r.timer = AUCTION_TIMER_SECONDS;
   r.timerPaused = false;
 
-  io.to(roomId).emit("timer_tick", r.timer, false);
+  io.to(roomId).emit("timer_tick", r.timer);
   io.to(roomId).emit("timer_status", false);
 
   r.timerInterval = setInterval(() => {
     if (r.timerPaused) return;
     r.timer--;
-    io.to(roomId).emit("timer_tick", r.timer, false);
+    io.to(roomId).emit("timer_tick", r.timer);
     if (r.timer <= 0) {
-      processSale(roomId, "TIMER");
+      processSale(roomId);
     }
   }, 1000);
 }
@@ -104,52 +78,64 @@ function processSale(roomId, source = "UNKNOWN") {
   stopTimer(roomId);
   io.to(roomId).emit("timer_ended");
 
+  let soldPrice = 0;
+  let soldTeamName = null;
+  let isUnsold = true;
+
   if (r.currentBidder) {
     const team = r.teams.find((t) => t.bidKey === r.currentBidder);
-    const price = r.currentBid;
-
     if (team) {
-      team.roster.push({ ...r.currentPlayer, price });
-      team.totalSpent += price;
+      soldPrice = r.currentBid;
+      team.roster.push({
+        ...r.currentPlayer,
+        price: soldPrice,
+        status: "SOLD",
+      });
+      team.totalSpent += soldPrice;
       team.totalPlayers += 1;
-      team.budget -= price;
+      team.budget -= soldPrice;
+      soldTeamName = team.name;
+      isUnsold = false;
     }
-
-    r.currentPlayer.status = "SOLD";
-    r.currentPlayer.soldPrice = price;
-
-    io.to(roomId).emit("sale_finalized", {
-      soldPlayer: r.currentPlayer,
-      isUnsold: false,
-      soldDetails: { soldTeam: team?.name },
-      price,
-      updatedTeams: r.teams,
-    });
-  } else {
-    r.currentPlayer.status = "UNSOLD";
-    io.to(roomId).emit("sale_finalized", {
-      soldPlayer: r.currentPlayer,
-      isUnsold: true,
-      price: 0,
-      updatedTeams: r.teams,
-    });
   }
+
+  r.currentPlayer.status = isUnsold ? "UNSOLD" : "SOLD";
+  r.currentPlayer.soldPrice = soldPrice;
+
+  io.to(roomId).emit("sale_finalized", {
+    soldPlayer: r.currentPlayer,
+    isUnsold: isUnsold,
+    soldDetails: { soldTeam: soldTeamName },
+    price: soldPrice,
+    updatedTeams: r.teams,
+  });
+
   r.auctionIndex++;
 
   setTimeout(() => {
     if (rooms[roomId]) rooms[roomId].sellingInProgress = false;
     startNextLot(roomId);
-  }, 3800);
+  }, 4000);
 }
 
 function startNextLot(roomId) {
   const r = rooms[roomId];
-  if (!r || r.auctionIndex >= r.auctionQueue.length) {
+  if (!r) return;
+
+  if (r.auctionIndex >= r.auctionQueue.length) {
     io.to(roomId).emit("open_squad_selection");
     return;
   }
 
   r.currentPlayer = r.auctionQueue[r.auctionIndex];
+
+  // Skip if already processed (Resuming)
+  if (r.currentPlayer.status) {
+    r.auctionIndex++;
+    startNextLot(roomId);
+    return;
+  }
+
   r.currentBid = r.currentPlayer.basePrice;
   r.currentBidder = null;
   r.sellingInProgress = false;
@@ -166,28 +152,19 @@ function startNextLot(roomId) {
 // --- AUTH MIDDLEWARE ---
 io.use((socket, next) => {
   const playerId = socket.handshake.auth.playerId;
-  if (playerId) {
-    socket.playerId = playerId;
-    return next();
-  }
-  socket.playerId = "guest_" + socket.id;
+  socket.playerId = playerId || "guest_" + socket.id;
   next();
 });
 
 // --- SOCKET HANDLERS ---
 io.on("connection", (socket) => {
-  const clientIp = getClientIp(socket);
-  console.log(
-    `User Connected: ${socket.id} (PID: ${socket.playerId}) [IP: ${clientIp}]`
-  );
+  console.log(`User Connected: ${socket.id} (PID: ${socket.playerId})`);
 
-  socket.on("pingServer", () => {
-    socket.emit("pongServer");
-  });
+  socket.on("pingServer", () => socket.emit("pongServer"));
 
-  // 1. Create Room
+  // 1. CREATE ROOM
   socket.on("create_room", ({ roomId, password, config }) => {
-    if (rooms[roomId]) return socket.emit("error_message", "Room exists");
+    if (rooms[roomId]) return socket.emit("error_message", "Room Exists!");
 
     rooms[roomId] = {
       password,
@@ -204,7 +181,7 @@ io.on("connection", (socket) => {
       timerPaused: true,
       state: { isActive: false },
       adminSocketId: socket.id,
-      adminIP: getClientIp(socket), // 🔧 STORE IP FOR RECOVERY
+      adminPlayerId: socket.playerId,
       sellingInProgress: false,
       squads: {},
     };
@@ -213,55 +190,37 @@ io.on("connection", (socket) => {
     socket.emit("roomcreated", roomId);
   });
 
-  // 2. Join Room (FIXED)
+  // 2. JOIN ROOM
   socket.on("join_room", ({ roomId, password }) => {
     const r = rooms[roomId];
     if (!r || r.password !== password)
-      return socket.emit("error_message", "Invalid Login");
+      return socket.emit("error_message", "Invalid Credentials");
 
     socket.join(roomId);
     if (!r.users.includes(socket.id)) r.users.push(socket.id);
 
-    const currentIp = getClientIp(socket);
     let isAdminReconnected = false;
 
-    // 🔧 HOST RECOVERY: If IP matches Admin IP, forcefully take over
-    if (r.adminIP && r.adminIP === currentIp) {
-      console.log(`Host recovered via IP: ${currentIp}`);
-
-      // Disconnect the "ghost" socket if it exists
-      const oldAdminSocket = io.sockets.sockets.get(r.adminSocketId);
-      if (oldAdminSocket && oldAdminSocket.id !== socket.id) {
-        oldAdminSocket.disconnect(true);
-      }
-
+    if (r.adminPlayerId === socket.playerId) {
       r.adminSocketId = socket.id;
       isAdminReconnected = true;
     }
 
-    // 🔧 TEAM RECOVERY: Force update socket ID if IP matches
-    const myExistingTeam = r.teams.find(
-      (t) => t.ownerPlayerId === socket.playerId || t.ownerIP === currentIp
-    );
-
-    if (myExistingTeam) {
-      console.log(`Player reclaimed team: ${myExistingTeam.name} via IP Match`);
-      myExistingTeam.ownerSocketId = socket.id; // Force update to new socket
-      socket.emit("team_claim_success", myExistingTeam.bidKey);
+    const myTeam = r.teams.find((t) => t.ownerPlayerId === socket.playerId);
+    if (myTeam) {
+      myTeam.ownerSocketId = socket.id;
+      socket.emit("team_claim_success", myTeam.bidKey);
     }
-
-    const syncState = {
-      isActive: r.state.isActive,
-      teams: r.teams,
-      queue: r.auctionQueue,
-      auctionIndex: r.auctionIndex,
-    };
 
     socket.emit("room_joined", {
       roomId,
       isAdmin: isAdminReconnected,
       lobbyState: { teams: r.teams, userCount: r.users.length },
-      state: syncState,
+      state: {
+        isActive: r.state.isActive,
+        teams: r.teams,
+        queue: r.auctionQueue,
+      },
     });
 
     io.to(roomId).emit("lobby_update", {
@@ -287,34 +246,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    const roomId = getRoomId(socket);
-    const r = rooms[roomId];
-    if (!r) return;
-
-    r.users = r.users.filter((id) => id !== socket.id);
-
-    // We do NOT remove the ownerIP or playerID, allowing them to reconnect
-    const ownedTeam = r.teams.find((t) => t.ownerSocketId === socket.id);
-    if (ownedTeam) {
-      console.log(`Owner of ${ownedTeam.name} disconnected temporarily.`);
-      ownedTeam.ownerSocketId = null;
-    }
-
-    io.to(roomId).emit("lobby_update", {
-      teams: r.teams,
-      userCount: r.users.length,
-    });
-
-    if (r.users.length === 0) {
-      stopTimer(roomId);
-      delete rooms[roomId];
-    }
-  });
-
   socket.on("update_lobby_teams", (teams) => {
     const roomId = getRoomId(socket);
-    if (roomId && rooms[roomId]) {
+    if (rooms[roomId]) {
       rooms[roomId].teams = teams;
       io.to(roomId).emit("lobby_update", {
         teams,
@@ -323,37 +257,30 @@ io.on("connection", (socket) => {
     }
   });
 
+  // --- TEAM CLAIMING ---
   socket.on("claim_lobby_team", (key) => {
     const roomId = getRoomId(socket);
     const r = rooms[roomId];
     if (!r) return;
 
-    const currentIp = getClientIp(socket);
-
-    const existingTeam = r.teams.find(
-      (team) =>
-        team.ownerPlayerId === socket.playerId || team.ownerIP === currentIp
-    );
-    if (existingTeam && existingTeam.bidKey !== key) {
-      socket.emit("error_message", "You already have a team!");
-      return;
+    if (
+      r.teams.find(
+        (t) => t.ownerPlayerId === socket.playerId && t.bidKey !== key
+      )
+    ) {
+      return socket.emit("error_message", "You already own a team!");
     }
 
     const t = r.teams.find((x) => x.bidKey === key);
-
-    // Allow claim if not taken OR if "taken" but IP matches (reclaim)
-    if (t) {
-      if (!t.isTaken || t.ownerIP === currentIp) {
-        t.isTaken = true;
-        t.ownerSocketId = socket.id;
-        t.ownerPlayerId = socket.playerId;
-        t.ownerIP = currentIp;
-        socket.emit("team_claim_success", key);
-        io.to(roomId).emit("lobby_update", {
-          teams: r.teams,
-          userCount: r.users.length,
-        });
-      }
+    if (t && (!t.isTaken || t.ownerPlayerId === socket.playerId)) {
+      t.isTaken = true;
+      t.ownerSocketId = socket.id;
+      t.ownerPlayerId = socket.playerId;
+      socket.emit("team_claim_success", key);
+      io.to(roomId).emit("lobby_update", {
+        teams: r.teams,
+        userCount: r.users.length,
+      });
     }
   });
 
@@ -363,12 +290,66 @@ io.on("connection", (socket) => {
     if (!r) return;
     const t = r.teams.find((x) => x.bidKey === key);
 
-    const currentIp = getClientIp(socket);
-    if (t && (t.ownerPlayerId === socket.playerId || t.ownerIP === currentIp)) {
+    if (t && t.ownerPlayerId === socket.playerId) {
       t.ownerSocketId = socket.id;
       socket.emit("team_claim_success", key);
     }
   });
+
+  // ==========================================
+  // 🚀 NEW: MANUAL RECLAIM (HOST APPROVAL)
+  // ==========================================
+  socket.on("request_reclaim_manual", ({ teamKey }) => {
+    const roomId = getRoomId(socket);
+    const r = rooms[roomId];
+    if (!r) return;
+
+    const targetTeam = r.teams.find((t) => t.bidKey === teamKey);
+    if (!targetTeam) return;
+
+    // Send request to Admin
+    if (r.adminSocketId) {
+      io.to(r.adminSocketId).emit("admin_reclaim_request", {
+        teamKey: teamKey,
+        teamName: targetTeam.name,
+        requesterId: socket.id,
+        requesterPid: socket.playerId,
+      });
+    }
+  });
+
+  socket.on(
+    "admin_reclaim_decision",
+    ({ approved, teamKey, requesterId, requesterPid }) => {
+      const roomId = getRoomId(socket);
+      const r = rooms[roomId];
+      if (!r || !isAdmin(socket)) return;
+
+      if (approved) {
+        const team = r.teams.find((t) => t.bidKey === teamKey);
+        if (team) {
+          // Transfer Ownership
+          team.ownerSocketId = requesterId;
+          team.ownerPlayerId = requesterPid;
+
+          // Notify the user
+          io.to(requesterId).emit("team_claim_success", teamKey);
+          // Update lobby
+          io.to(roomId).emit("lobby_update", {
+            teams: r.teams,
+            userCount: r.users.length,
+          });
+        }
+      } else {
+        // Notify rejection
+        io.to(requesterId).emit(
+          "error_message",
+          "Host denied your reclaim request."
+        );
+      }
+    }
+  );
+  // ==========================================
 
   socket.on("admin_rename_team", ({ key, newName }) => {
     const roomId = getRoomId(socket);
@@ -384,31 +365,27 @@ io.on("connection", (socket) => {
   socket.on("start_auction", ({ teams, queue }) => {
     const roomId = getRoomId(socket);
     const r = rooms[roomId];
-    if (!r || !isAdmin(socket)) return;
-
-    r.teams = teams.map((t) => ({
-      ...t,
-      roster: [],
-      totalSpent: 0,
-      totalPlayers: 0,
-    }));
-    r.auctionQueue = queue;
-    r.auctionIndex = 0;
-    r.state.isActive = true;
-
-    io.to(roomId).emit("auction_started", {
-      teams: r.teams,
-      queue: r.auctionQueue,
-    });
-    startNextLot(roomId);
+    if (r && isAdmin(socket)) {
+      r.teams = teams.map((t) => ({
+        ...t,
+        roster: [],
+        totalSpent: 0,
+        totalPlayers: 0,
+      }));
+      r.auctionQueue = queue;
+      r.state.isActive = true;
+      io.to(roomId).emit("auction_started", {
+        teams: r.teams,
+        queue: r.auctionQueue,
+      });
+      startNextLot(roomId);
+    }
   });
 
-  // 5. BIDDING (FIXED FOR REFRESH)
+  // --- BIDDING ---
   socket.on("place_bid", ({ teamKey, amount }) => {
     const roomId = getRoomId(socket);
     const r = rooms[roomId];
-    const bidderSocket = io.sockets.sockets.get(socket.id);
-
     if (
       !r ||
       !r.state.isActive ||
@@ -419,50 +396,31 @@ io.on("connection", (socket) => {
       return;
 
     const team = r.teams.find((t) => t.bidKey === teamKey);
+    if (!team) return;
 
-    if (!team)
-      return (
-        bidderSocket && bidderSocket.emit("error_message", "Invalid team.")
-      );
-
-    // 🔧 AUTO-FIX SOCKET ID MISMATCH
-    // If the socket ID doesn't match, check the IP. If IP matches, update socket ID and allow bid.
+    // Strict Check: Only current owner
     if (team.ownerSocketId !== socket.id) {
-      const currentIp = getClientIp(socket);
-      if (team.ownerIP === currentIp) {
-        console.log(
-          `Auto-fixing socket for bidder ${team.name} (Refresh detected)`
-        );
+      // If persistent ID matches, update socket
+      if (team.ownerPlayerId === socket.playerId) {
         team.ownerSocketId = socket.id;
       } else {
-        return (
-          bidderSocket &&
-          bidderSocket.emit("error_message", "You do not own this team.")
-        );
+        return socket.emit("error_message", "Authorization Failed");
       }
     }
 
     if (r.currentBidder === teamKey) return;
-    if (team.budget < amount)
-      return (
-        bidderSocket && bidderSocket.emit("error_message", "Not enough budget!")
-      );
-    if (amount <= r.currentBid)
-      return (
-        bidderSocket && bidderSocket.emit("error_message", "Bid is too low.")
-      );
+    if (team.budget < amount) return socket.emit("error_message", "No Budget!");
+    if (amount <= r.currentBid && r.currentBidder)
+      return socket.emit("error_message", "Bid too low!");
 
     r.currentBid = amount;
     r.currentBidder = teamKey;
 
-    io.to(roomId).emit("bid_update", {
-      amount,
-      team,
-    });
-
+    io.to(roomId).emit("bid_update", { amount, team });
     startTimer(roomId);
   });
 
+  // --- ADMIN CONTROLS ---
   socket.on("toggle_timer", () => {
     const roomId = getRoomId(socket);
     const r = rooms[roomId];
@@ -472,46 +430,33 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("request_next_player", () => {
-    const roomId = getRoomId(socket);
-    if (isAdmin(socket) && rooms[roomId] && !rooms[roomId].sellingInProgress) {
-      startNextLot(roomId);
-    }
-  });
-
   socket.on("finalize_sale", ({ isUnsold, soldTo, price }) => {
     const roomId = getRoomId(socket);
-    const r = rooms[roomId];
-    if (!r || !isAdmin(socket)) return;
-    if (isUnsold) r.currentBidder = null;
-    processSale(roomId, "ADMIN_MANUAL");
+    if (isAdmin(socket)) {
+      if (isUnsold) rooms[roomId].currentBidder = null;
+      processSale(roomId, "ADMIN");
+    }
   });
 
   socket.on("end_auction_trigger", () => {
     const roomId = getRoomId(socket);
-    if (!isAdmin(socket)) return;
-    const r = rooms[roomId];
-    stopTimer(roomId);
-    r.state.isActive = false;
-    io.to(roomId).emit("open_squad_selection");
+    if (isAdmin(socket)) {
+      stopTimer(roomId);
+      r.state.isActive = false;
+      io.to(roomId).emit("open_squad_selection");
+    }
   });
 
+  // --- SIMULATION ---
   socket.on("submit_squad", ({ teamKey, playing11, impact, captain }) => {
     const roomId = getRoomId(socket);
     const r = rooms[roomId];
     if (r) {
       r.squads[teamKey] = { playing11, impact, captain };
-      const total = r.teams.length;
-      const submitted = Object.keys(r.squads).length;
-
       io.to(roomId).emit("squad_submission_update", {
-        submittedCount: submitted,
-        totalTeams: total,
+        submittedCount: Object.keys(r.squads).length,
+        totalTeams: r.teams.filter((t) => t.isTaken).length,
       });
-
-      if (submitted === total) {
-        setTimeout(() => runSimulationLogic(roomId, r), 2000);
-      }
     }
   });
 
@@ -520,46 +465,52 @@ io.on("connection", (socket) => {
     const r = rooms[roomId];
     if (r && isAdmin(socket)) runSimulationLogic(roomId, r);
   });
-});
 
-function runSimulationLogic(roomId, r) {
-  const tourneyTeams = r.teams
-    .map((t) => ({
-      name: t.name,
-      bidKey: t.bidKey,
-      playing11: r.squads[t.bidKey] ? r.squads[t.bidKey].playing11 : [],
-      roster: t.roster || [],
-      captain: r.squads[t.bidKey] ? r.squads[t.bidKey].captain : null,
-    }))
-    .filter((t) => t.playing11.length === 11 || t.roster.length >= 11);
-
-  tourneyTeams.forEach((t) => {
-    if (t.playing11.length !== 11 && t.roster.length >= 11) {
-      t.playing11 = t.roster.slice(0, 11);
+  socket.on("disconnect", () => {
+    const roomId = getRoomId(socket);
+    const r = rooms[roomId];
+    if (r) {
+      r.users = r.users.filter((id) => id !== socket.id);
+      io.to(roomId).emit("lobby_update", {
+        teams: r.teams,
+        userCount: r.users.length,
+      });
     }
   });
+});
+
+// --- AI ENGINE ---
+function runSimulationLogic(roomId, r) {
+  const tourneyTeams = r.teams
+    .filter((t) => t.isTaken)
+    .map((t) => {
+      const squadData = r.squads[t.bidKey];
+      let p11 = squadData ? squadData.playing11 : [];
+      if (p11.length < 11 && t.roster.length >= 11) p11 = t.roster.slice(0, 11);
+
+      return {
+        ...t,
+        playing11: p11,
+        captain: squadData ? squadData.captain : p11[0]?.name || "None",
+      };
+    })
+    .filter((t) => t.playing11.length === 11);
 
   if (tourneyTeams.length < 2) {
-    io.to(roomId).emit(
-      "simulation_error",
-      `Cannot start! Need at least 2 teams with 11+ players. Currently have: ${tourneyTeams.length}`
-    );
-    return;
+    return io
+      .to(roomId)
+      .emit("simulation_error", "Need at least 2 teams with 11 players!");
   }
+
   const results = runAdvancedSimulation(tourneyTeams);
   io.to(roomId).emit("tournament_results", results);
 }
-
-// ==========================================
-// REALISTIC T20 AI ENGINE
-// ==========================================
 
 function runAdvancedSimulation(teams) {
   const stats = {};
   const leagueMatches = [];
   const playoffs = [];
 
-  // Initialize Global Stats
   teams.forEach((t) => {
     t.stats = {
       p: 0,
@@ -578,177 +529,124 @@ function runAdvancedSimulation(teams) {
           name: p.name,
           role: p.roleKey || "batter",
           runs: 0,
-          balls: 0,
+          wkts: 0,
+          pts: 0,
           fours: 0,
           sixes: 0,
-          wickets: 0,
-          overs: 0,
-          runsGiven: 0,
-          pts: 0,
         };
     });
   });
 
   function getStat(name) {
-    return stats[name];
+    return stats[name] || { runs: 0, wkts: 0, pts: 0 };
   }
 
-  function simulateInnings(batTeam, bowlTeam, target = null) {
+  function simulateInnings(batTeam, bowlTeam, target) {
     let score = 0,
       wickets = 0,
-      legalBallsBowled = 0;
-    const MAX_BALLS = 120;
-    const getMatchForm = () => Math.floor(Math.random() * 10) - 5;
+      balls = 0;
 
-    let battingCard = batTeam.playing11.map((p) => ({
+    const battingCard = batTeam.playing11.map((p) => ({
       name: p.name,
       runs: 0,
       balls: 0,
       fours: 0,
       sixes: 0,
       status: "dnb",
-      skill: (p.stats?.bat || 50) + getMatchForm(),
-      luck: (p.stats?.luck || 50) + getMatchForm(),
-      role: p.roleKey,
+      skill: (p.stats?.bat || 50) + (Math.random() * 10 - 5),
     }));
 
-    let validBowlers = bowlTeam.playing11.filter((p) =>
-      ["bowler", "allrounder", "spinner", "fast"].includes(p.roleKey)
-    );
-    if (validBowlers.length < 5) {
-      let batters = bowlTeam.playing11.filter((p) => p.roleKey === "batter");
-      validBowlers = [
-        ...validBowlers,
-        ...batters.slice(0, 5 - validBowlers.length),
-      ];
-    }
-    if (validBowlers.length < 5) {
-      let wks = bowlTeam.playing11.filter((p) => p.roleKey === "wk");
-      validBowlers = [
-        ...validBowlers,
-        ...wks.slice(0, 5 - validBowlers.length),
-      ];
-    }
-
-    let bowlingCard = validBowlers.map((b) => ({
-      name: b.name,
-      overs: 0,
+    let bowlingCard = bowlTeam.playing11.slice(5).map((p) => ({
+      name: p.name,
       runs: 0,
       wkts: 0,
       balls: 0,
-      skill:
-        (["wk", "batter"].includes(b.roleKey) ? 20 : b.stats?.bowl || 50) +
-        getMatchForm(),
-      luck: (b.stats?.luck || 50) + getMatchForm(),
-      role: b.roleKey,
+      skill: (p.stats?.bowl || 50) + (Math.random() * 10 - 5),
     }));
+    if (bowlingCard.length < 5) {
+      bowlTeam.playing11.slice(0, 5).forEach((p) => {
+        if (bowlingCard.length < 5)
+          bowlingCard.push({
+            name: p.name,
+            runs: 0,
+            wkts: 0,
+            balls: 0,
+            skill: 40,
+          });
+      });
+    }
 
-    let strikerIdx = 0,
-      nonStrikerIdx = 1;
+    let strikerIdx = 0;
+    let nonStrikerIdx = 1;
     battingCard[strikerIdx].status = "not out";
     battingCard[nonStrikerIdx].status = "not out";
 
-    while (legalBallsBowled < MAX_BALLS && wickets < 10) {
-      if (target !== null && score > target) break;
+    while (balls < 120 && wickets < 10) {
+      if (target && score > target) break;
 
-      let overNum = Math.floor(legalBallsBowled / 6);
-      let bowlerObj = bowlingCard[overNum % bowlingCard.length];
-      let strikerObj = battingCard[strikerIdx];
+      const bowler = bowlingCard[Math.floor(balls / 6) % bowlingCard.length];
+      const striker = battingCard[strikerIdx];
 
-      let batVal = strikerObj.skill;
-      let bowlVal = bowlerObj.skill;
-      if (["wk", "batter"].includes(bowlerObj.role)) batVal += 15;
+      if (!striker) break;
 
-      let luckDiff = strikerObj.luck - bowlerObj.luck;
-      let ballLuck = Math.random();
-      let diff = batVal - bowlVal + luckDiff * 0.15;
       let outcome = 0;
+      const diff = striker.skill - bowler.skill;
+      const luck = Math.random();
 
-      if (diff > 40) {
-        if (ballLuck > 0.98) outcome = -1;
-        else if (ballLuck > 0.88) outcome = 6;
-        else if (ballLuck > 0.7) outcome = 4;
-        else if (ballLuck > 0.35) outcome = 1;
-        else if (ballLuck > 0.25) outcome = 2;
-        else outcome = 0;
-      } else if (diff > 20) {
-        if (ballLuck > 0.96) outcome = -1;
-        else if (ballLuck > 0.9) outcome = 6;
-        else if (ballLuck > 0.78) outcome = 4;
-        else if (ballLuck > 0.4) outcome = 1;
-        else if (ballLuck > 0.3) outcome = 2;
-        else outcome = 0;
-      } else if (diff < -20) {
-        if (ballLuck > 0.85) outcome = -1;
-        else if (ballLuck > 0.95) outcome = 4;
-        else if (ballLuck > 0.5) outcome = 0;
-        else outcome = 1;
-      } else {
-        if (ballLuck > 0.95) outcome = -1;
-        else if (ballLuck > 0.92) outcome = 6;
-        else if (ballLuck > 0.82) outcome = 4;
-        else if (ballLuck > 0.45) outcome = 1;
-        else if (ballLuck > 0.35) outcome = 2;
-        else outcome = 0;
-      }
+      if (luck > 0.95 && diff < 20) outcome = -1; // Wicket
+      else if (luck > 0.85) outcome = 6;
+      else if (luck > 0.7) outcome = 4;
+      else if (luck > 0.4) outcome = 1;
+      else outcome = 0;
 
-      if (overNum >= 16) {
-        if (outcome === 0 && Math.random() > 0.6) outcome = -1;
-        else if (outcome === 1 && Math.random() > 0.7) outcome = 4;
-      }
-
-      legalBallsBowled++;
-      bowlerObj.balls++;
-      if (bowlerObj.balls % 6 === 0) getStat(bowlerObj.name).overs++;
+      balls++;
+      bowler.balls++;
 
       if (outcome === -1) {
         wickets++;
-        bowlerObj.wkts++;
-        getStat(bowlerObj.name).wickets++;
-        getStat(bowlerObj.name).pts += 25;
-        strikerObj.balls++;
-        getStat(strikerObj.name).balls++;
-        strikerObj.status = "out";
+        bowler.wkts++;
+        getStat(bowler.name).wkts++;
+        getStat(bowler.name).pts += 25;
+        striker.status = "out";
+        striker.balls++;
         strikerIdx = Math.max(strikerIdx, nonStrikerIdx) + 1;
         if (strikerIdx < 11) battingCard[strikerIdx].status = "not out";
       } else {
         score += outcome;
-        strikerObj.runs += outcome;
-        strikerObj.balls++;
+        striker.runs += outcome;
+        striker.balls++;
+        bowler.runs += outcome;
+
+        getStat(striker.name).runs += outcome;
+        getStat(striker.name).pts += outcome;
         if (outcome === 4) {
-          strikerObj.fours++;
-          getStat(strikerObj.name).fours++;
+          striker.fours++;
+          getStat(striker.name).fours++;
+          getStat(striker.name).pts += 1;
         }
         if (outcome === 6) {
-          strikerObj.sixes++;
-          getStat(strikerObj.name).sixes++;
+          striker.sixes++;
+          getStat(striker.name).sixes++;
+          getStat(striker.name).pts += 2;
         }
-        getStat(strikerObj.name).runs += outcome;
-        getStat(strikerObj.name).balls++;
-        getStat(strikerObj.name).pts += outcome;
-        if (outcome === 4) getStat(strikerObj.name).pts += 1;
-        if (outcome === 6) getStat(strikerObj.name).pts += 2;
 
-        bowlerObj.runs += outcome;
-        getStat(bowlerObj.name).runsGiven += outcome;
         if (outcome % 2 !== 0)
           [strikerIdx, nonStrikerIdx] = [nonStrikerIdx, strikerIdx];
       }
-      if (legalBallsBowled % 6 === 0)
+
+      if (balls % 6 === 0)
         [strikerIdx, nonStrikerIdx] = [nonStrikerIdx, strikerIdx];
     }
 
     bowlingCard.forEach((b) => {
-      let o = Math.floor(b.balls / 6);
-      let rem = b.balls % 6;
-      b.oversDisplay = rem === 0 ? o : `${o}.${rem}`;
-      b.economy = b.balls > 0 ? ((b.runs / b.balls) * 6).toFixed(1) : "0.0";
+      b.oversDisplay = `${Math.floor(b.balls / 6)}.${b.balls % 6}`;
+      b.economy = b.balls > 0 ? (b.runs / (b.balls / 6)).toFixed(1) : "0.0";
     });
 
     return {
       score,
       wickets,
-      balls: legalBallsBowled,
+      balls,
       battingCard,
       bowlingCard,
       teamName: batTeam.name,
@@ -759,113 +657,51 @@ function runAdvancedSimulation(teams) {
     const i1 = simulateInnings(t1, t2, null);
     const i2 = simulateInnings(t2, t1, i1.score);
 
-    let win, lose, margin;
-    if (i2.score > i1.score) {
-      win = t2;
-      lose = t1;
-      margin = `${10 - i2.wickets} wkts`;
-    } else if (i1.score > i2.score) {
-      win = t1;
-      lose = t2;
-      margin = `${i1.score - i2.score} runs`;
-    } else {
-      win = t1;
-      lose = t2;
-      margin = "Super Over";
-    }
+    let winner = i1.score > i2.score ? t1 : t2;
+    let margin =
+      i1.score > i2.score
+        ? `${i1.score - i2.score} runs`
+        : `${10 - i2.wickets} wkts`;
 
     if (type === "League") {
-      win.stats.p++;
-      win.stats.w++;
-      win.stats.pts += 2;
-      lose.stats.p++;
-      lose.stats.l++;
-      win.stats.runsScored += win === t1 ? i1.score : i2.score;
-      win.stats.runsConceded += win === t1 ? i2.score : i1.score;
-      win.stats.oversFaced += win === t1 ? 20 : i2.balls / 6;
-      win.stats.oversBowled += win === t1 ? i2.balls / 6 : 20;
-      lose.stats.runsScored += lose === t1 ? i1.score : i2.score;
-      lose.stats.runsConceded += lose === t1 ? i2.score : i1.score;
-      lose.stats.oversFaced += lose === t1 ? 20 : i2.balls / 6;
-      lose.stats.oversBowled += lose === t1 ? i2.balls / 6 : 20;
+      winner.stats.p++;
+      winner.stats.w++;
+      winner.stats.pts += 2;
+      const loser = winner === t1 ? t2 : t1;
+      loser.stats.p++;
+      loser.stats.l++;
+
+      winner.stats.runsScored += winner === t1 ? i1.score : i2.score;
+      winner.stats.oversFaced += winner === t1 ? 20 : i2.balls / 6;
+      winner.stats.runsConceded += winner === t1 ? i2.score : i1.score;
+      winner.stats.oversBowled += winner === t1 ? i2.balls / 6 : 20;
+
+      loser.stats.runsScored += loser === t1 ? i1.score : i2.score;
+      loser.stats.oversFaced += loser === t1 ? 20 : i2.balls / 6;
+      loser.stats.runsConceded += loser === t1 ? i2.score : i1.score;
+      loser.stats.oversBowled += loser === t1 ? i2.balls / 6 : 20;
     }
 
-    const allBat = [...i1.battingCard, ...i2.battingCard];
-    const allBowl = [...i1.bowlingCard, ...i2.bowlingCard];
-    const topScorer = allBat.sort((a, b) => b.runs - a.runs)[0] || {
-      name: "-",
-      runs: 0,
-    };
-    const bestBowler = allBowl.sort(
-      (a, b) => b.wkts - a.wkts || a.runs - b.runs
-    )[0] || { name: "-", wkts: 0 };
-
-    let matchPerformers = [];
-    const addPerf = (name, team, ptsToAdd, descStr) => {
-      let p = matchPerformers.find((x) => x.name === name);
-      if (!p) {
-        p = { name, team, points: 0, desc: [] };
-        matchPerformers.push(p);
-      }
-      p.points += ptsToAdd;
-      if (descStr) p.desc.push(descStr);
-    };
-    i1.battingCard.forEach((p) => {
-      if (p.runs > 0)
-        addPerf(
-          p.name,
-          t1.name,
-          p.runs + p.sixes * 2 + p.fours,
-          `${p.runs} runs`
-        );
-    });
-    i1.bowlingCard.forEach((p) => {
-      if (p.wkts > 0) addPerf(p.name, t2.name, p.wkts * 25, `${p.wkts} wkts`);
-    });
-    i2.battingCard.forEach((p) => {
-      if (p.runs > 0)
-        addPerf(
-          p.name,
-          t2.name,
-          p.runs + p.sixes * 2 + p.fours,
-          `${p.runs} runs`
-        );
-    });
-    i2.bowlingCard.forEach((p) => {
-      if (p.wkts > 0) addPerf(p.name, t1.name, p.wkts * 25, `${p.wkts} wkts`);
-    });
-    matchPerformers.sort((a, b) => b.points - a.points);
-
-    const t1BestBat = i1.battingCard.sort((a, b) => b.runs - a.runs)[0] || {
-      name: "-",
-      runs: 0,
-    };
-    const t1BestBowl = i2.bowlingCard.sort(
-      (a, b) => b.wkts - a.wkts || a.runs - b.runs
-    )[0] || { name: "-", wkts: 0, runs: 0 };
-    const t2BestBat = i2.battingCard.sort((a, b) => b.runs - a.runs)[0] || {
-      name: "-",
-      runs: 0,
-    };
-    const t2BestBowl = i1.bowlingCard.sort(
-      (a, b) => b.wkts - a.wkts || a.runs - b.runs
-    )[0] || { name: "-", wkts: 0, runs: 0 };
+    const getBestBat = (card) =>
+      card.sort((a, b) => b.runs - a.runs)[0] || { name: "-", runs: 0 };
+    const getBestBowl = (card) =>
+      card.sort((a, b) => b.wkts - a.wkts)[0] || { name: "-", wkts: 0 };
 
     return {
-      type,
       t1: t1.name,
       t2: t2.name,
       score1: `${i1.score}/${i1.wickets}`,
       score2: `${i2.score}/${i2.wickets}`,
-      winnerName: win.name,
+      winnerName: winner.name,
       margin,
-      topScorer: { name: topScorer.name, runs: topScorer.runs },
-      bestBowler: { name: bestBowler.name, figures: `${bestBowler.wkts} wkts` },
-      winObj: win,
-      loseObj: lose,
-      top3Performers: matchPerformers.slice(0, 3),
-      t1Best: { bat: t1BestBat, bowl: t1BestBowl },
-      t2Best: { bat: t2BestBat, bowl: t2BestBowl },
+      type,
+      topScorer: getBestBat([...i1.battingCard, ...i2.battingCard]),
+      bestBowler: {
+        name: getBestBowl([...i1.bowlingCard, ...i2.bowlingCard]).name,
+        figures: `${
+          getBestBowl([...i1.bowlingCard, ...i2.bowlingCard]).wkts
+        } wkts`,
+      },
       details: {
         i1: {
           team: t1.name,
@@ -882,77 +718,59 @@ function runAdvancedSimulation(teams) {
           bowl: i2.bowlingCard,
         },
       },
-      allTeamsData: teams,
     };
   }
 
   for (let i = 0; i < teams.length; i++) {
-    for (let j = 0; j < teams.length; j++) {
-      if (i !== j) leagueMatches.push(playMatch(teams[i], teams[j], "League"));
+    for (let j = i + 1; j < teams.length; j++) {
+      leagueMatches.push(playMatch(teams[i], teams[j], "League"));
     }
   }
 
   teams.forEach((t) => {
-    if (t.stats.oversFaced > 0) {
-      let forRate = t.stats.runsScored / t.stats.oversFaced;
-      let againstRate = t.stats.runsConceded / t.stats.oversBowled;
-      t.stats.nrr = forRate - againstRate;
+    if (t.stats.oversFaced > 0 && t.stats.oversBowled > 0) {
+      t.stats.nrr =
+        t.stats.runsScored / t.stats.oversFaced -
+        t.stats.runsConceded / t.stats.oversBowled;
     }
   });
   teams.sort((a, b) => b.stats.pts - a.stats.pts || b.stats.nrr - a.stats.nrr);
 
-  let champion, runner;
+  let champion = teams[0].name,
+    runner = teams[1].name;
   if (teams.length >= 4) {
     const q1 = playMatch(teams[0], teams[1], "Qualifier 1");
-    playoffs.push(q1);
-    const eli = playMatch(teams[2], teams[3], "Eliminator");
-    playoffs.push(eli);
-    const q2 = playMatch(q1.loseObj, eli.winObj, "Qualifier 2");
-    playoffs.push(q2);
-    const fin = playMatch(q1.winObj, q2.winObj, "FINAL");
-    playoffs.push(fin);
-    champion = fin.winnerName;
-    runner = champion === q1.winObj.name ? q2.winObj.name : q1.winObj.name;
+    const elim = playMatch(teams[2], teams[3], "Eliminator");
+    const tQ2_1 = q1.winnerName === teams[0].name ? teams[1] : teams[0];
+    const tQ2_2 = elim.winnerName === teams[2].name ? teams[2] : teams[3];
+    const q2 = playMatch(tQ2_1, tQ2_2, "Qualifier 2");
+    const tFin_1 = teams.find((t) => t.name === q1.winnerName);
+    const tFin_2 = teams.find((t) => t.name === q2.winnerName);
+    const final = playMatch(tFin_1, tFin_2, "FINAL");
+    playoffs.push(q1, elim, q2, final);
+    champion = final.winnerName;
+    runner = final.winnerName === tFin_1.name ? tFin_2.name : tFin_1.name;
   } else {
-    const fin = playMatch(teams[0], teams[1], "FINAL");
-    playoffs.push(fin);
-    champion = fin.winnerName;
-    runner = teams[0].name === champion ? teams[1].name : teams[0].name;
+    const final = playMatch(teams[0], teams[1], "FINAL");
+    playoffs.push(final);
+    champion = final.winnerName;
+    runner = champion === teams[0].name ? teams[1].name : teams[0].name;
   }
 
-  const allStats = Object.values(stats);
-  const orangeCap = allStats
-    .filter((s) => s.role === "batter" || s.role === "wk")
-    .sort((a, b) => b.runs - a.runs)[0] || { name: "-", runs: 0 };
-  const purpleCap = allStats
-    .filter(
-      (s) => s.role === "bowler" || s.role === "spinner" || s.role === "fast"
-    )
-    .sort((a, b) => b.wickets - a.wickets)[0] || { name: "-", wickets: 0 };
-  const mvp = allStats
-    .filter((s) => s.role === "allrounder")
-    .sort((a, b) => b.pts - a.pts)[0] || { name: "-", pts: 0 };
-
+  const allStatsValues = Object.values(stats);
   return {
     winner: champion,
     runnerUp: runner,
-    standings: teams.map((t) => ({
-      name: t.name,
-      played: t.stats.p,
-      won: t.stats.w,
-      lost: t.stats.l,
-      points: t.stats.pts,
-      nrr: t.stats.nrr,
-    })),
+    standings: teams,
     leagueMatches,
     playoffs,
-    orangeCap,
-    purpleCap,
-    mvp,
     allTeamsData: teams,
+    orangeCap: allStatsValues.sort((a, b) => b.runs - a.runs)[0],
+    purpleCap: allStatsValues.sort((a, b) => b.wkts - a.wkts)[0],
+    mvp: allStatsValues.sort((a, b) => b.pts - a.pts)[0],
   };
 }
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+server.listen(PORT, "0.0.0.0", () =>
+  console.log(`Server running on port ${PORT}`)
+);
