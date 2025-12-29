@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 
@@ -16,7 +17,7 @@
 
     <style>
         /* =========================================
-           NEW CINEMATIC INTRO STYLES
+           CINEMATIC INTRO STYLES
            ========================================= */
         #introOverlay {
             position: fixed;
@@ -31,7 +32,6 @@
             animation: overlayFadeOut 1s ease-out 4.5s forwards;
         }
 
-        /* MOVING SPOTLIGHTS BACKGROUND */
         .spotlight-bg {
             position: absolute;
             top: -50%;
@@ -55,11 +55,9 @@
             perspective: 800px;
         }
 
-        /* TEXT STYLING - METALLIC LOOK */
         .broken-text {
             font-family: 'Teko', sans-serif;
             font-size: clamp(3rem, 15vw, 7rem);
-            /* Responsive font size */
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 4px;
@@ -76,14 +74,11 @@
             filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.5));
             animation: textFlickerEntry 1s ease-out forwards, shatterBlast 1s cubic-bezier(0.165, 0.84, 0.44, 1) 1.4s forwards;
             opacity: 0;
-            /* Hidden initially */
         }
 
-        /* 3D GAVEL ANIMATION */
         .gavel-wrapper {
             position: absolute;
             top: -300px;
-            /* Start high */
             left: 50%;
             width: 300px;
             height: 300px;
@@ -94,7 +89,6 @@
             animation: hammerSmashSequence 1.5s ease-out 0.2s forwards;
         }
 
-        /* SHOCKWAVE RING */
         .shockwave {
             position: absolute;
             top: 50%;
@@ -110,7 +104,6 @@
             animation: shockwaveRipple 0.8s ease-out 1.4s forwards;
         }
 
-        /* SOLD STAMP */
         .sold-stamp {
             position: absolute;
             top: 50%;
@@ -129,13 +122,11 @@
             z-index: 30;
             background: rgba(0, 0, 0, 0.3);
             mask-image: url('https://s3-us-west-2.amazonaws.com/s.cdpn.io/8399/grunge.png');
-            /* Grunge texture mask */
             -webkit-mask-image: url('https://s3-us-west-2.amazonaws.com/s.cdpn.io/8399/grunge.png');
             mask-size: 400px;
             animation: stampSlam 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) 2.2s forwards;
         }
 
-        /* SPARKS PARTICLES */
         .spark {
             position: absolute;
             width: 4px;
@@ -149,10 +140,7 @@
             z-index: 15;
         }
 
-        /* =========================================
-           KEYFRAMES
-           ========================================= */
-
+        /* KEYFRAMES */
         @keyframes rotateSpotlights {
             from {
                 transform: rotate(0deg);
@@ -205,24 +193,20 @@
             }
 
             60% {
-                /* Raise High */
                 transform: translateX(-50%) translateY(-80%) rotate(-60deg) scale(1.5);
             }
 
             75% {
-                /* The Hit Point (aligned with text break at 1.4s) */
                 transform: translateX(-50%) translateY(0%) rotate(0deg) scale(1);
             }
 
             85% {
-                /* Recoil */
                 transform: translateX(-50%) translateY(-10%) rotate(-5deg) scale(1);
             }
 
             100% {
                 transform: translateX(-50%) translateY(0%) rotate(0deg) scale(1);
                 opacity: 0;
-                /* Fade out after hit */
             }
         }
 
@@ -238,7 +222,6 @@
                 text-shadow: 0 0 50px white;
             }
 
-            /* Flash white */
             100% {
                 transform: translate(var(--tx), var(--ty)) rotate(var(--r));
                 opacity: 0;
@@ -323,9 +306,7 @@
             animation: screenShake 0.5s ease-in-out;
         }
 
-        /* =========================================
-           ENHANCED ABOUT SECTION STYLES
-           ========================================= */
+        /* ABOUT SECTION STYLES */
         .workflow-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -355,7 +336,6 @@
             background: linear-gradient(145deg, rgba(255, 255, 255, 0.05) 0%, rgba(30, 30, 45, 0.8) 100%);
         }
 
-        /* Watermark Background Number */
         .card-bg-number {
             position: absolute;
             top: -15px;
@@ -375,7 +355,6 @@
             transform: scale(1.1) rotate(-5deg);
         }
 
-        /* Icon Wrapper */
         .card-icon-box {
             width: 60px;
             height: 60px;
@@ -397,7 +376,6 @@
             border-color: transparent;
         }
 
-        /* Content Styling */
         .card-title {
             font-family: 'Rajdhani', sans-serif;
             font-weight: 700;
@@ -417,7 +395,6 @@
             margin: 0;
         }
 
-        /* Special Highlight Card */
         .workflow-card.highlight-card {
             grid-column: 1 / -1;
             background: linear-gradient(90deg, rgba(255, 215, 0, 0.1) 0%, rgba(0, 0, 0, 0.4) 100%);
@@ -456,11 +433,8 @@
 <body class="mobile-layout" style="background-color: #0b0c15;">
 
     <div id="introOverlay">
-
         <div class="spotlight-bg"></div>
-
         <div class="intro-content" id="introContent">
-
             <div class="broken-text">
                 <span style="--tx:-200px; --ty:-300px; --r:-120deg">I</span>
                 <span style="--tx:-100px; --ty:200px; --r:-45deg">P</span>
@@ -474,9 +448,7 @@
                 <span style="--tx:300px; --ty:-50px; --r:-15deg">O</span>
                 <span style="--tx:350px; --ty:150px; --r:80deg">N</span>
             </div>
-
             <div class="shockwave"></div>
-
             <div class="gavel-wrapper">
                 <svg viewBox="0 0 200 300" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%;">
                     <defs>
@@ -493,7 +465,6 @@
                             <stop offset="100%" style="stop-color:#8A6E2F" />
                         </linearGradient>
                     </defs>
-
                     <rect x="90" y="80" width="20" height="200" rx="4" fill="url(#woodGradient)" />
                     <rect x="90" y="260" width="20" height="10" fill="rgba(0,0,0,0.3)" />
                     <g transform="translate(0, 0)">
@@ -505,14 +476,10 @@
                     </g>
                 </svg>
             </div>
-
-            <div class="sold-stamp">START...</div>
-
+            <div class="sold-stamp">START..</div>
         </div>
-
         <div id="sparkContainer"></div>
     </div>
-
 
     <div id="lobbyScreen">
         <div class="lobby-card">
@@ -582,86 +549,8 @@
                     <div class="text-center mb-5">
                         <h2 class="display-font text-white"
                             style="font-size: 3.5rem; letter-spacing: 2px; text-shadow: 0 0 20px rgba(0, 122, 255, 0.5);">
-                            IPL MEGA
-                            AUCTION '25</h2>
-                        <p class="text-white-50 fs-5">The Complete Multiplayer Strategy Experience</p>
-                    </div>
-
-                    <div class="workflow-grid">
-                        <div class="workflow-card">
-                            <div class="card-bg-number">01</div>
-                            <div class="card-icon-box"
-                                style="background: rgba(0, 122, 255, 0.1); color: #007aff; border-color: rgba(0,122,255,0.3);">
-                                <i class="bi bi-door-open-fill"></i>
-                            </div>
-                            <h4 class="card-title" style="color: #64b5f6;">Lobby & Teams</h4>
-                            <p class="card-desc">Create a secure private room. Joiners select their favorite franchises.
-                                Host configures budget caps & slots.</p>
-                        </div>
-
-                        <div class="workflow-card">
-                            <div class="card-bg-number">02</div>
-                            <div class="card-icon-box"
-                                style="background: rgba(255, 215, 0, 0.1); color: #ffd700; border-color: rgba(255,215,0,0.3);">
-                                <i class="bi bi-hammer"></i>
-                            </div>
-                            <h4 class="card-title text-gold">Live Bidding</h4>
-                            <p class="card-desc">Real-time low latency auction. Bid wars against friends. Manage your
-                                purse dynamically. Don't go broke!</p>
-                        </div>
-
-                        <div class="workflow-card">
-                            <div class="card-bg-number">03</div>
-                            <div class="card-icon-box"
-                                style="background: rgba(0, 230, 118, 0.1); color: #00e676; border-color: rgba(0,230,118,0.3);">
-                                <i class="bi bi-person-check-fill"></i>
-                            </div>
-                            <h4 class="card-title" style="color: #69f0ae;">Squad Selection</h4>
-                            <p class="card-desc">Strategically select your Playing XI, 1 Impact Player, and appoint a
-                                Captain from your purchased lot.</p>
-                        </div>
-
-                        <div class="workflow-card">
-                            <div class="card-bg-number">04</div>
-                            <div class="card-icon-box"
-                                style="background: rgba(224, 64, 251, 0.1); color: #e040fb; border-color: rgba(224,64,251,0.3);">
-                                <i class="bi bi-cpu-fill"></i>
-                            </div>
-                            <h4 class="card-title" style="color: #ea80fc;">AI Simulation</h4>
-                            <p class="card-desc">Advanced Algorithm simulates the entire season match-by-match,
-                                calculating runs, wickets, and NRR.</p>
-                        </div>
-
-                        <div class="workflow-card">
-                            <div class="card-bg-number">05</div>
-                            <div class="card-icon-box"
-                                style="background: rgba(255, 87, 34, 0.1); color: #ff5722; border-color: rgba(255,87,34,0.3);">
-                                <i class="bi bi-graph-up-arrow"></i>
-                            </div>
-                            <h4 class="card-title" style="color: #ff8a65;">Stats & Awards</h4>
-                            <p class="card-desc">Instant analysis. View Points Table. Orange Cap, Purple Cap, and MVP
-                                winners declared instantly.</p>
-                        </div>
-
-                        <div class="workflow-card highlight-card">
-                            <div class="card-bg-number">06</div>
-                            <div class="card-icon-box">
-                                <i class="bi bi-trophy-fill"></i>
-                            </div>
-                            <div>
-                                <h4 class="card-title text-white"
-                                    style="color:white; font-size: 2rem; text-shadow: 0 0 10px rgba(0,0,0,0.5);">The
-                                    Champion</h4>
-                                <p class="card-desc text-white" style="color:rgba(255,255,255,0.9); font-size: 1.1rem;">
-                                    Playoffs logic executes. The Final is played. One team lifts the IPL Trophy in
-                                    glory!</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="mt-5 pt-3 border-top border-secondary text-center">
-                        <small class="text-white-50 font-monospace">POWERED BY: HTML5 • CSS3 • Bootstrap 5 • Socket.IO •
-                            Node.js</small>
+                            IPL MEGA AUCTION '25
+                        </h2>
                     </div>
                 </div>
             </div>
@@ -689,14 +578,6 @@
                         <li class="list-group-item bg-transparent text-white border-secondary">
                             <i class="bi bi-globe text-primary me-2"></i>
                             <strong>Foreign Players:</strong> Maximum 8 overseas players per squad.
-                        </li>
-                        <li class="list-group-item bg-transparent text-white border-secondary">
-                            <i class="bi bi-hammer text-warning me-2"></i>
-                            <strong>Bidding:</strong> Once the timer stops, the player is sold to the highest bidder.
-                        </li>
-                        <li class="list-group-item bg-transparent text-white border-secondary">
-                            <i class="bi bi-clock-history text-danger me-2"></i>
-                            <strong>Time:</strong> Bids reset the timer. Act fast!
                         </li>
                     </ul>
                 </div>
@@ -736,9 +617,6 @@
                 <div class="selection-header">
                     <h2 class="m-0">SELECT PLAYING XI & CAPTAIN</h2>
                     <p class="small text-white-50 mb-0">Choose exactly 11 Players + 1 Impact Player</p>
-                    <p class="small text-warning mb-0 mt-1" style="letter-spacing: 1px; font-weight: bold;">
-                        ⚠️ RULES: Max 4 Foreign | Min 1 WK | Select 1 Captain
-                    </p>
                 </div>
                 <div class="selection-body">
                     <div class="row h-100">
@@ -881,6 +759,10 @@
                     data-bs-target="#teamStatusModal" onclick="renderSquads()">SQUADS</button>
                 <button class="btn btn-sm btn-outline-light rounded-0" data-bs-toggle="modal"
                     data-bs-target="#listModal" onclick="renderPlayerPool()">PLAYERS</button>
+
+                <button id="soundToggleBtn" class="btn btn-sm btn-outline-light rounded-0 ms-2">
+                    <i class="bi bi-volume-mute-fill"></i>
+                </button>
             </div>
         </header>
 
@@ -900,27 +782,14 @@
                         <div class="col-12">
                             <h5 class="text-warning">Game Settings (Host Only)</h5>
                         </div>
-                        <div class="col-4"><label class="text-white-50 small">Purse (INR)</label><input id="budget"
+                        <div class="col-6"><label class="text-white-50 small">Purse (INR)</label><input id="budget"
                                 type="number" class="form-control form-control-dark" value="1000000000"></div>
-                        <div class="col-4"><label class="text-white-50 small">Min Increment</label><input id="increment"
+                        <div class="col-6"><label class="text-white-50 small">Min Increment</label><input id="increment"
                                 type="number" class="form-control form-control-dark" value="2500000">
                         </div>
-                        <div class="col-4">
-                            <label class="text-white-50 small">Team Count</label>
-                            <select id="teamCountSelect" class="form-select">
-                                <option value="2">2 Teams</option>
-                                <option value="3">3 Teams</option>
-                                <option value="4">4 Teams</option>
-                                <option value="5">5 Teams</option>
-                                <option value="6">6 Teams</option>
-                                <option value="7">7 Teams</option>
-                                <option value="8">8 Teams</option>
-                                <option value="9">9 Teams</option>
-                                <option value="10" selected>10 Teams</option>
-                            </select>
-                        </div>
                         <div class="col-12 text-center mt-2">
-                            <small class="text-info">Host can rename teams. Joiners select a slot below.</small>
+                            <small class="text-info">Wait for players to join teams. Only active teams will proceed to
+                                auction.</small>
                         </div>
                     </div>
 
