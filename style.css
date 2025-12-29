@@ -283,6 +283,7 @@ body::before {
   height: 55px;
 }
 
+/* LOBBY JOIN CARDS */
 .lobby-team-card {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -385,6 +386,27 @@ body::before {
   z-index: 100;
   box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
   position: relative;
+}
+
+#soundToggleBtn {
+    width: 35px;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.2);
+    color: #aaa;
+    transition: all 0.3s;
+}
+#soundToggleBtn:hover {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+}
+#soundToggleBtn.active {
+    color: var(--brand-gold);
+    border-color: var(--brand-gold);
+    box-shadow: 0 0 10px rgba(255,215,0,0.3);
+    background: rgba(255, 215, 0, 0.1);
 }
 
 .main-container {
