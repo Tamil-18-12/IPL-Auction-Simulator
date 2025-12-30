@@ -1763,6 +1763,8 @@ document.getElementById("placeBidBtn").addEventListener("click", submitMyBid);
 document.addEventListener("keydown", (e) => {
   if (lobbyScreen.style.display !== "none") return;
   if (e.code === "Space" || e.code === "Enter") {
+    // PREVENT ACCIDENTAL BID WHILE TYPING IN OTHER INPUTS
+    if(document.activeElement.tagName === "INPUT" && document.activeElement.id !== "customBidInput") return;
     e.preventDefault();
     submitMyBid();
   }
@@ -2014,14 +2016,14 @@ function countForeigners(list) {
   return list.filter((p) => p.playerType === "Foreign").length;
 }
 function countKeepers(list) {
-  return list.filter((p) => p.roleKey.includes("wk")).length;
+  return list.filter((p) => (p.roleKey||"").toLowerCase().includes("wk") || (p.roleKey||"").toLowerCase() === "wicketkeeper").length;
 }
 
 function renderMySquadSelection() {
   const myTeam = globalTeams.find((t) => t.bidKey === mySelectedTeamKey);
   const list = document.getElementById("playing11List");
   const impList = document.getElementById("impactList");
-  list.innerHTML = "";
+  list.innerHTML = '<small class="text-warning d-block mb-2 text-center" style="font-size:0.75rem;">Batting Order = Selection Order (1-11)</small>';
   impList.innerHTML = "";
 
   if (!myTeam || !myTeam.roster || myTeam.roster.length === 0)
@@ -2033,7 +2035,7 @@ function renderMySquadSelection() {
   );
 
   sortedRoster.forEach((p, i) => {
-    const originalIndex = myTeam.roster.findIndex((x) => x.name === p.name);
+    const originalIndex = myTeam.roster.indexOf(p); // FIXED: Use reference index
     const isForeign = p.playerType === "Foreign";
     const badge = isForeign
       ? '<span class="badge bg-danger ms-2" style="font-size:0.6rem">✈️</span>'
@@ -2337,6 +2339,7 @@ function renderAllTeams(teamsData) {
   });
 }
 
+// --- MATCH CARD CREATOR ---
 function createMatchCard(m, isPlayoff = false, index) {
   const topScorerName = m.topScorer ? m.topScorer.name : "-";
   const topScorerRuns = m.topScorer ? m.topScorer.runs : "0";
@@ -2346,13 +2349,14 @@ function createMatchCard(m, isPlayoff = false, index) {
 
   let footerHtml = `<div class="d-flex justify-content-between w-100 px-2"><div class="perf-item"><span class="role-badge role-bat me-2">BAT</span> <span class="text-white">${topScorerName} <span class="text-warning">(${topScorerRuns})</span></span></div><div class="perf-item"><span class="role-badge role-bowl me-2">BOWL</span> <span class="text-white">${bestBowlerName} <span class="text-info">(${bestBowlerFigs})</span></span></div></div>`;
 
+  // ADDED: Click handler to open scorecard
   const clickFn = `onclick="openScorecard('${
     isPlayoff ? "playoff" : "league"
   }', ${index})"`;
 
   return `<div class="match-card ${
     isPlayoff ? "playoff" : ""
-  }" ${clickFn}><div class="match-header"><div class="match-type-label">${m.type.toUpperCase()}</div><div class="mom-star"><i class="bi bi-star-fill"></i> ${momName}</div></div><div class="match-content"><div class="team-score-box"><div class="ts-name">${
+  }" ${clickFn} style="cursor: pointer;"><div class="match-header"><div class="match-type-label">${m.type.toUpperCase()}</div><div class="mom-star"><i class="bi bi-star-fill"></i> ${momName}</div></div><div class="match-content"><div class="team-score-box"><div class="ts-name">${
     m.t1
   }</div><div class="ts-score">${
     m.score1.split("/")[0]
@@ -2369,45 +2373,102 @@ function createMatchCard(m, isPlayoff = false, index) {
   }</div><div class="match-footer" style="flex-direction:column; align-items:stretch;">${footerHtml}</div></div>`;
 }
 
+// --- OPEN SCORECARD (DETAILED) ---
 function openScorecard(type, index) {
   if (!lastTournamentData) return;
+  
+  // 1. Fetch Data
   const matchData =
     type === "league"
       ? lastTournamentData.leagueMatches[index]
       : lastTournamentData.playoffs[index];
-  const details = matchData.details;
-  if (!details) return alert("Scorecard details not available");
+  
+  if (!matchData) return;
+  if (!matchData.details) {
+     const modalBody = document.getElementById("detailedScorecardContent");
+     modalBody.innerHTML = "<div class='p-4 text-white text-center'>Detailed scorecard not generated for this match.</div>";
+     const modal = new bootstrap.Modal(document.getElementById("scorecardModal"));
+     modal.show();
+     return;
+  }
 
+  // 2. Prepare Modal Content
+  const d = matchData.details;
   const modalBody = document.getElementById("detailedScorecardContent");
-  const renderInnings = (innData) => {
-    let batRows = innData.bat
-      .map(
-        (b) =>
-          `<tr class="scorecard-bat-row ${
-            b.status === "out" ? "out" : "not-out"
-          }"><td>${b.name} ${b.status === "not out" ? "*" : ""}</td><td>${
-            b.runs
-          }</td><td>${b.balls}</td><td>${b.fours}</td><td>${b.sixes}</td><td>${
-            b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : "0.0"
-          }</td></tr>`
-      )
-      .join("");
-    let bowlRows = innData.bowl
-      .map(
-        (b) =>
-          `<tr><td>${b.name}</td><td>${b.oversDisplay}</td><td>0</td><td>${b.runs}</td><td>${b.wkts}</td><td>${b.economy}</td></tr>`
-      )
-      .join("");
-    return `<div class="scorecard-team-header ${
-      matchData.winnerName === innData.team ? "winner" : ""
-    }"><span>${innData.team}</span><span>${innData.score}/${
-      innData.wkts
-    }</span></div><div class="p-2"><table class="scorecard-table"><thead><tr><th width="40%">Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>${batRows}</tbody></table><table class="scorecard-table mt-3"><thead><tr><th width="40%">Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>ECO</th></tr></thead><tbody>${bowlRows}</tbody></table></div>`;
+  
+  // Helper to render one innings table
+  const renderInningsTable = (inn, title) => {
+      let batRows = "";
+      inn.bat.forEach(b => {
+          batRows += `
+          <tr style="border-bottom: 1px solid #333;">
+            <td class="text-white">${b.name} ${b.status === "not out" ? "*" : ""}</td>
+            <td class="text-end fw-bold text-warning">${b.runs}</td>
+            <td class="text-end text-white-50">${b.balls}</td>
+            <td class="text-end text-white-50">${b.fours}</td>
+            <td class="text-end text-white-50">${b.sixes}</td>
+            <td class="text-end text-white-50">${b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(0) : "0"}</td>
+          </tr>`;
+      });
+
+      let bowlRows = "";
+      inn.bowl.forEach(b => {
+          bowlRows += `
+          <tr style="border-bottom: 1px solid #333;">
+            <td class="text-white">${b.name}</td>
+            <td class="text-end text-white-50">${b.oversDisplay}</td>
+            <td class="text-end text-white-50">${b.runs}</td>
+            <td class="text-end fw-bold text-info">${b.wkts}</td>
+            <td class="text-end text-white-50">${b.economy}</td>
+          </tr>`;
+      });
+
+      return `
+        <div class="mb-4">
+            <div class="d-flex justify-content-between align-items-center bg-dark p-2 rounded mb-2">
+                <span class="text-success fw-bold">${title} (${inn.team})</span>
+                <span class="text-white fw-bold">${inn.score}/${inn.wickets} <small class="text-muted">(${inn.balls} balls)</small></span>
+            </div>
+            
+            <h6 class="text-white-50 small mt-2">BATTING</h6>
+            <table class="table table-borderless table-sm small mb-3">
+                <thead class="text-secondary" style="font-size: 0.75rem;"><tr><th>Batter</th><th class="text-end">R</th><th class="text-end">B</th><th class="text-end">4s</th><th class="text-end">6s</th><th class="text-end">SR</th></tr></thead>
+                <tbody>${batRows}</tbody>
+            </table>
+
+            <h6 class="text-white-50 small mt-2">BOWLING</h6>
+            <table class="table table-borderless table-sm small">
+                 <thead class="text-secondary" style="font-size: 0.75rem;"><tr><th>Bowler</th><th class="text-end">O</th><th class="text-end">R</th><th class="text-end">W</th><th class="text-end">ER</th></tr></thead>
+                <tbody>${bowlRows}</tbody>
+            </table>
+            ${inn.ballLog ? `<div class="text-center mt-2"><button class="btn btn-xs btn-outline-secondary" onclick="alert('Ball-by-ball log available in console due to UI space limit.')">View Ball Log in Console</button></div>` : ""}
+        </div>
+      `;
   };
-  modalBody.innerHTML = renderInnings(details.i1) + renderInnings(details.i2);
-  const modal = new bootstrap.Modal(document.getElementById("scorecardModal"));
+
+  modalBody.innerHTML = `
+    <div class="modal-header border-0 bg-dark">
+        <h5 class="modal-title w-100 text-center text-warning">${matchData.t1} vs ${matchData.t2}</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body bg-black" style="max-height: 80vh; overflow-y: auto;">
+        ${renderInningsTable(d.i1, "1st Innings")}
+        ${renderInningsTable(d.i2, "2nd Innings")}
+    </div>
+    <div class="modal-footer border-0 bg-dark justify-content-center">
+        <span class="text-success fw-bold text-uppercase">${matchData.winnerName} WON BY ${matchData.margin.toUpperCase()}</span>
+    </div>
+  `;
+
+  // 3. Show Modal
+  if (d.i1.ballLog) console.log("Innings 1 Log:", d.i1.ballLog);
+  if (d.i2.ballLog) console.log("Innings 2 Log:", d.i2.ballLog);
+
+  const modalEl = document.getElementById("scorecardModal");
+  const modal = new bootstrap.Modal(modalEl);
   modal.show();
 }
+
 
 function renderPlayerPool() {
   const a = document.getElementById("availableList"),
