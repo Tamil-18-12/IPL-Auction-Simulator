@@ -11,7 +11,7 @@ if (!myPersistentId) {
   localStorage.setItem("ipl_auction_player_id", myPersistentId);
 }
 
-console.log("🔑 My Persistent ID:", myPersistentId);
+
 
 // ======================================================
 // 🔊 REALISTIC SOUND & TTS ENGINE
@@ -257,12 +257,7 @@ setInterval(() => {
   }
 }, 25000);
 
-setInterval(() => {
-  console.log("⏰ Sending HTTP Wake-up Call...");
-  fetch(window.location.href, { mode: "no-cors" })
-    .then(() => console.log("✅ Server Woken Up"))
-    .catch((e) => console.error("⚠️ Wake-up Failed", e));
-}, 300000);
+
 
 // --- SOCKET STATUS HANDLERS ---
 socket.on("connect", () => {
@@ -1028,6 +1023,13 @@ const PLAYER_IMAGE_MAP = {
     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ96_gVuW8JTbxirRPH9mVAjB59jbtQRt6UtQ&s",
 };
 
+
+// FIX: Runtime Normalization of Image Keys to Lowercase
+const NORMALIZED_IMAGE_MAP = {};
+Object.keys(PLAYER_IMAGE_MAP).forEach((k) => {
+  NORMALIZED_IMAGE_MAP[k.toLowerCase()] = PLAYER_IMAGE_MAP[k];
+});
+
 // --- CONSTANTS ---
 const ROLE_ORDER = {
   wk: 1,
@@ -1227,6 +1229,84 @@ function initLobbyState() {
   renderLobbyTeams();
 }
 
+// FIX: Add missing sync_data listener
+socket.off("sync_data");
+socket.on("sync_data", (data) => {
+  if (data.teams) {
+    globalTeams = data.teams;
+    switchToAuctionMode(globalTeams);
+  }
+  if (data.queue) auctionQueue = data.queue;
+  
+  if (data.currentLot) {
+    // Restore current lot view
+    // Simulate 'update_lot' behavior
+    const p = data.currentLot;
+    currentActivePlayer = p;
+    saleProcessing = false;
+
+    // Update UI elements manually or trigger logic
+    document.getElementById("currentSet").innerText = p.set;
+    document.getElementById("lotNoDisplay").innerText = `LOT #${(data.auctionIndex + 1)
+      .toString()
+      .padStart(3, "0")}`;
+    document.getElementById("pName").innerText = p.name;
+    document.getElementById("pCat").innerText = p.category;
+    document.getElementById("pBase").innerText = formatAmount(p.basePrice);
+    document.getElementById("pTypeBadge").innerText = p.roleKey.toUpperCase();
+
+    const avatar = document.getElementById("pInitials");
+    if (p.img) {
+      avatar.innerText = "";
+      avatar.style.backgroundImage = `url('${p.img}')`;
+    } else {
+      avatar.style.backgroundImage = "none";
+      avatar.innerText = p.name.substring(0, 2).toUpperCase();
+    }
+    
+    document.getElementById("pBid").innerText = formatAmount(data.currentBid);
+    
+    // Update Bidder/Team Info
+    if (data.currentBidder) {
+        const bidderTeam = globalTeams.find(t => t.bidKey === data.currentBidder);
+        if (bidderTeam) {
+            document.getElementById("pTeam").innerHTML = `<span class="text-warning">${bidderTeam.name}</span>`;
+            currentHighestBidderKey = data.currentBidder;
+            document.getElementById("skipBtn").disabled = true;
+            document.getElementById("soldBtn").disabled = false;
+        }
+    } else {
+        document.getElementById("pTeam").innerHTML = `<span class="text-white-50">Opening Bid</span>`;
+        currentHighestBidderKey = null;
+        document.getElementById("skipBtn").disabled = false;
+        document.getElementById("soldBtn").disabled = true;
+    }
+    
+    // Resume Timer
+    const timerEl = document.getElementById("auctionTimer");
+    if (timerEl) {
+        timerEl.innerText = data.timer;
+        if (data.timerPaused) timerEl.classList.add("timer-paused");
+        else timerEl.classList.remove("timer-paused");
+    }
+    
+    const bidBtn = document.getElementById("placeBidBtn");
+    bidBtn.disabled = false;
+    updateBidControlsState(p);
+  }
+});
+
+
+function escapeHtml(text) {
+  if (typeof text !== "string") return text;
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function renderLobbyTeams() {
   const container = document.getElementById("teamNamesContainer");
   container.innerHTML = "";
@@ -1257,9 +1337,10 @@ function renderLobbyTeams() {
       }
     }
 
+    const safeName = escapeHtml(t.name);
     let nameInput = isAdmin
-      ? `<input type="text" class="form-control form-control-sm text-center bg-dark text-white border-secondary" value="${t.name}" onchange="adminRenameTeam('${t.bidKey}', this.value)">`
-      : `<div class="fs-4 fw-bold text-white">${t.name}</div>`;
+      ? `<input type="text" class="form-control form-control-sm text-center bg-dark text-white border-secondary" value="${safeName}" onchange="adminRenameTeam('${t.bidKey}', this.value)">`
+      : `<div class="fs-4 fw-bold text-white">${safeName}</div>`;
 
     container.innerHTML += `<div class="lobby-team-card ${statusClass}" ${clickAction}><span class="lobby-status-badge ${
       statusClass === "available"
@@ -1387,8 +1468,10 @@ function buildAuctionQueue() {
     let name = typeof dataObj === "object" ? dataObj.name : dataObj;
     let type = typeof dataObj === "object" ? dataObj.type : "Unknown";
     const stats = getPlayerStats(name, roleHint);
+    // FIX: Use normalized map for case-insensitive lookup
+    const safeKey = name.toLowerCase();
     const imageSrc =
-      PLAYER_IMAGE_MAP[name] || PLAYER_IMAGE_MAP[name.toLowerCase()] || null;
+      NORMALIZED_IMAGE_MAP[safeKey] || PLAYER_IMAGE_MAP[name] || null;
     return {
       name,
       category: `${type} ${roleHint}`,
@@ -1658,7 +1741,10 @@ function submitMyBid() {
   const currentBidText = document.getElementById("pBid").innerText;
   const inc = parseInt(document.getElementById("customBidInput").value);
 
-  const current = parsePrice(currentBidText) || currentActivePlayer.basePrice;
+  const parsed = parsePrice(currentBidText);
+  // FIX: If parsed is 0 (e.g. "₹-"), we MUST use basePrice.
+  // If parsed > 0, we use it.
+  const current = parsed > 0 ? parsed : currentActivePlayer.basePrice;
   const bidAmount = current + inc;
 
   if (myTeam.budget < bidAmount) {
@@ -2065,16 +2151,19 @@ function forceRunSim() {
 
 socket.off("squad_submission_update");
 socket.on("squad_submission_update", (d) => {
-  document.getElementById(
-    "waitingMsg"
-  ).innerText = `WAITING... (${d.submittedCount}/${d.totalTeams} SUBMITTED)`;
-  if (
-    isAdmin &&
-    !document.getElementById("waitingMsg").innerHTML.includes("FORCE")
-  ) {
-    document.getElementById(
-      "waitingMsg"
-    ).innerHTML += `<br><button onclick="forceRunSim()" class="btn btn-sm btn-outline-warning mt-2">FORCE START SIMULATION</button>`;
+  const msgEl = document.getElementById("waitingMsg");
+  msgEl.innerHTML = `WAITING... (${d.submittedCount}/${d.totalTeams} SUBMITTED)`;
+  
+  if (isAdmin) {
+    // Check if button already exists to prevent duplicates
+    if (!document.getElementById("forceStartBtn")) {
+      const btn = document.createElement("button");
+      btn.id = "forceStartBtn";
+      btn.className = "btn btn-sm btn-outline-warning mt-2 d-block mx-auto";
+      btn.innerText = "FORCE START SIMULATION (AI FILL)";
+      btn.onclick = forceRunSim;
+      msgEl.appendChild(btn);
+    }
   }
 });
 
@@ -2155,16 +2244,17 @@ socket.on("tournamentComplete", (results) => {
     });
   }
 
-  const mLog = document.getElementById("matchLogContainer");
-  mLog.innerHTML = "";
-  if (results.leagueMatches.length > 0) {
-    results.leagueMatches.forEach(
-      (m, i) => (mLog.innerHTML += createMatchCard(m, false, i))
-    );
-  } else {
-    mLog.innerHTML =
-      "<div class='text-center text-muted'>Detailed match logs unavailable in simple mode</div>";
+  // --- POPULATE FILTER DROPDOWN ---
+  const select = document.getElementById("matchFilterTeam");
+  select.innerHTML = '<option value="ALL">ALL TEAMS</option>';
+  if (results.standings) {
+      results.standings.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
+          select.innerHTML += `<option value="${t.name}">${t.name}</option>`;
+      });
   }
+
+  // Render initial view (All Matches)
+  filterMatchLogs("ALL");
 
   const tree = document.getElementById("playoffTree");
   tree.innerHTML = "";
@@ -2181,6 +2271,25 @@ socket.on("tournamentComplete", (results) => {
   renderAllTeams(results.allTeamsData);
   speakText("Simulation Complete. The winner is " + winnerText);
 });
+
+// --- MATCH FILTER LOGIC ---
+window.filterMatchLogs = function(teamName) {
+    const mLog = document.getElementById("matchLogContainer");
+    mLog.innerHTML = "";
+    
+    if (!lastTournamentData || !lastTournamentData.leagueMatches) return;
+
+    const allMatches = lastTournamentData.leagueMatches;
+    const filtered = teamName === "ALL" 
+        ? allMatches 
+        : allMatches.filter(m => m.t1 === teamName || m.t2 === teamName);
+
+    if (filtered.length > 0) {
+        filtered.forEach((m, i) => mLog.innerHTML += createMatchCard(m, false, i));
+    } else {
+        mLog.innerHTML = "<div class='text-center text-white-50 p-4'>No matches found for " + teamName + "</div>";
+    }
+};
 
 function renderAllTeams(teamsData) {
   const container = document.getElementById("allTeamsContainer");
