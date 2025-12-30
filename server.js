@@ -631,88 +631,135 @@ function getPhase(over) {
   return "death";
 }
 
-function chooseShot(profile, phase, pressure) {
-  let boundaryChance = profile.aggression;
 
-  if (phase === "powerplay") boundaryChance += 0.1;
-  if (phase === "death") boundaryChance += 0.25;
-  if (pressure > 9) boundaryChance += 0.2;
-
-  // Anchor Cap: Anchors don't go wild unless necessary
-  if (profile === BATTER_PROFILE.anchor && phase !== "death" && pressure < 8) {
-     boundaryChance = Math.min(boundaryChance, 0.5);
-  }
-
-  return Math.min(boundaryChance, 0.95);
-}
 
 function getBowlerType(roleKey) {
   const r = (roleKey || "").toLowerCase();
   if (r.includes("spin")) return "spin";
   if (r.includes("fast") || r.includes("pace")) return "pace";
+  if (r.includes("fast") || r.includes("pace")) return "pace";
   return "medium";
 }
 
-function bowlerImpact(bowlerType, phase) {
-  // Realism Tune: Middle overs = Stability (More dots, fewer wickets)
-  if (bowlerType === "spin" && phase === "middle") return { dot: 0.2, wicket: 0.08 };
-  if (bowlerType === "pace" && phase === "death") return { dot: 0.1, wicket: 0.15 };
-  return { dot: 0.05, wicket: 0.05 };
-}
+// 🏟️ PITCH TYPES (Fixed Definition)
+const PITCH_TYPES = {
+  BATTING: {
+    name: "Batting Friendly",
+    runBoost: 1,
+    luckShift: -1   // fewer wickets
+  },
+  BOWLING: {
+    name: "Bowling Friendly",
+    runBoost: -1,
+    luckShift: 1    // more wickets
+  },
+  COMMON: {
+    name: "Balanced",
+    runBoost: 0,
+    luckShift: 0
+  }
+};
+
+
 
 // --- NEW REALISTIC ENGINE ---
-function playBall(batsman, bowler, context) {
-  const luck = getLuck();
-  const profile = getBatterProfile(batsman.roleKey);
-  const phase = getPhase(context.over);
-  // Default RRR of 8 if setting target, else calc real RRR
-  const pressure = context.requiredRunRate || 8; 
-  const bowlerType = getBowlerType(bowler.roleKey);
-  const impact = bowlerImpact(bowlerType, phase);
+// --- FINAL BALL ENGINE (WITH PITCH INFLUENCE) ---
+function simulateBall(batsman, bowler, phase = "middle", pitch = PITCH_TYPES.COMMON) {
+  let luck = Math.floor(Math.random() * 10) + 1;
 
-  let result = { runs: 0, isOut: false, type: "runs", commentary: "" };
+  // Pitch influence
+  luck += pitch.luckShift;
 
-  // Wicket chance (modified by luck to keep user's luck stat relevant but minimal)
-  // High luck reduces out chance slightly
-  const luckFactor = (10 - luck) * 0.02; 
+  // Bowler skill bias (Skill modifiers to luck)
+  if ((bowler.bowl || 50) > 85) luck += 2;
+  else if ((bowler.bowl || 50) > 75) luck += 1;
+
+  // Phase effect
+  if (phase === "death") luck += 1;
+  if (phase === "powerplay") luck -= 1;
   
-  if (Math.random() < (profile.risk + impact.wicket + luckFactor) * 0.15) {
-    result.isOut = true;
-    result.type = "out";
-    result.commentary = "Caught! The risk didn't pay off.";
-    return result;
+  // Bowler pressure (Additional small nudge based on raw skill vs random)
+  const bowlBoost = (bowler.bowl || 50) / 100;
+  luck += Math.random() < bowlBoost ? 1 : 0;
+
+  // Clamp luck to ensure valid range 1-10+ (Logic handles >9 anyway, but let's keep it sane if needed, though high luck = OUT)
+  // Actually, don't clamp high, as high = Wicket. Clamp low to 1.
+  luck = Math.max(1, luck);
+
+  return resolveBall(luck, batsman, pitch);
+}
+
+function resolveBall(luck, batsman, pitch) {
+  const batBoost = (batsman.bat || 50) / 100;
+  let event = {
+    runs: 0,
+    wicket: false,
+    extra: null,
+    legal: true,
+    commentary: ""
+  };
+
+  // 1. WICKET (High Luck)
+  if (luck >= 9) {
+    event.wicket = true;
+    event.commentary = "OUT! Cleaned him up!";
+    return event;
   }
 
-  // Dot ball chance
-  if (Math.random() < impact.dot) {
-    result.runs = 0;
-    result.commentary = "Excellent delivery. No run.";
-    return result;
+  // 2. BOUNDARY (Medium-High Luck)
+  else if (luck >= 7) {
+    event.runs = Math.random() < batBoost ? 6 : 4;
+    event.commentary = event.runs === 6 ? "Maximum!" : "Four runs!";
+  }
+  else if (luck >= 5) {
+    event.runs = Math.random() < 0.5 ? 4 : 6;
+    event.commentary = "Boundary!";
+  }
+  
+  // 3. RUNS (Medium Luck)
+  else if (luck === 4) {
+    event.runs = Math.random() < 0.5 ? 2 : 3;
+    event.commentary = "Good running.";
+  }
+  else if (luck === 3) {
+    event.runs = 1;
+    event.commentary = "Single taken.";
+  }
+  
+  // 4. DOT / EXTRA (Low Luck)
+  else if (luck === 2) {
+    event.runs = 0;
+    event.commentary = "Dot ball.";
+  }
+  else {
+    // luck <= 1
+    event.extra = Math.random() < 0.7 ? "WIDE" : "NO BALL";
+    if(event.extra === "NO BALL") event.legal = false; // both wide & no-ball are illegal
+    event.runs = 1;
+    event.legal = false;
+    event.commentary = event.extra;
+    // Applying run boost to extras? No, distinct event.
+    return event; 
   }
 
-  // Boundary decision
-  const boundaryChance = chooseShot(profile, phase, pressure);
-  // Luck boosts boundary chance
-  if (Math.random() < boundaryChance * (luck / 5)) {
-    result.runs = Math.random() < 0.65 ? 4 : 6;
-    
-    // Realism Tune: Bowlers rarely hit 6s unless Luck is perfect
-    if (profile === BATTER_PROFILE.bowler && result.runs === 6 && luck < 10) {
-        result.runs = 4; // Downgrade to 4
-        result.commentary = "Edged down to third man for FOUR."; 
-    }
-
-    result.type = result.runs === 4 ? "four" : "six";
-    if (!result.commentary) {
-         result.commentary = result.runs === 4 ? "Smashed for FOUR!" : "That's huge! SIX runs!";
-    }
-    return result;
+  // Apply Pitch Run Boost (Only to legal runs)
+  if (event.legal && !event.wicket) {
+      // Logic from user: runs = Math.max(0, runs + pitch.runBoost);
+      // But we must handle boundaries carefully? 
+      // User said "runs = Math.max(0, runs + pitch.runBoost)".
+      // If runBoost is +1, singles become doubles? 4 becomes 5? (5 runs valid? maybe overthrown).
+      // If runBoost is -1, 4 becomes 3? 
+      // User prompt: "runs = Math.max(0, runs + pitch.runBoost);"
+      // Let's trust the "Simple & Powerful" logic.
+      const originalRuns = event.runs;
+      event.runs = Math.max(0, event.runs + pitch.runBoost);
+      
+      // Fix commentary if run count changes weirdly?
+      if (originalRuns === 4 && event.runs !== 4) event.commentary = `${event.runs} runs (cut off).`;
+      if (originalRuns === 6 && event.runs !== 6) event.commentary = `Just inside ropes! ${event.runs} runs.`;
   }
 
-  // Strike rotation (1s, 2s, 3s)
-  result.runs = Math.floor(Math.random() * 3) + 1;
-  result.commentary = "Working the gaps.";
-  return result;
+  return event;
 }
 
 function runNewLogicSimulation(teams) {
@@ -723,9 +770,9 @@ function runNewLogicSimulation(teams) {
   // Init Stats
   teams.forEach((t) => {
     t.stats = {
-      p: 0,
-      w: 0,
-      l: 0,
+      played: 0,
+      won: 0,
+      lost: 0,
       pts: 0,
       nrr: 0,
       runsScored: 0,
@@ -759,194 +806,194 @@ function runNewLogicSimulation(teams) {
   };
 
   // --- INNINGS SIMULATOR ---
-  function simulateInnings(batTeam, bowlTeam, target = null, pitchType = "flat") {
-    // 1. Sort Batting Lineup based on Roles
-    const battingLineup = [...batTeam.playing11].sort(
-      (a, b) => getPriority(a.roleKey) - getPriority(b.roleKey)
-    );
+  // --- INNINGS SIMULATOR (FINAL STRICT VERSION) ---
+  function simulateInnings(batTeam, bowlTeam, target = null, pitch = PITCH_TYPES.COMMON) {
+    // 1. LOCKED BATTING ORDER (User Selected)
+    // We clone playing11 below to ensure we don't mutate the global team object
+    // const battingOrder = batTeam.playing11; // Moved below to be explicitly a copy 
+    let strikerIndex = 0;
+    let nonStrikerIndex = 1;
+    let nextBatsmanIndex = 2;
 
-    // 2. Prepare Bowling Options (All non-WK usually)
-    let bowlers = bowlTeam.playing11.filter(
-      (p) => getPriority(p.roleKey) !== 1
-    ); // exclude openers/wk usually
-    // Prioritize actual bowlers/ARs
-    bowlers = bowlTeam.playing11.filter((p) => {
-      const r = (p.roleKey || "").toLowerCase();
-      return (
-        r.includes("bowl") ||
-        r.includes("fast") ||
-        r.includes("spin") ||
-        r.includes("ar") ||
-        r.includes("all")
-      );
+    // 2. Bowling Options (Filter valid bowlers)
+    const bowlers = bowlTeam.playing11.filter((p) => {
+        const r = (p.roleKey || "").toLowerCase();
+        return (r.includes("bowl") || r.includes("fast") || r.includes("spin") || r.includes("ar") || r.includes("all")) && !r.includes("wk") && !r.includes("wicketkeeper");
     });
-    if (bowlers.length < 5) bowlers = bowlTeam.playing11.slice(5); // fallback
-    if (bowlers.length === 0) bowlers = bowlTeam.playing11; // Extreme fallback (squad < 5)
+    // Fallback
+    const validBowlers = bowlers.length >= 5 ? bowlers : bowlTeam.playing11.slice(5).length > 0 ? bowlTeam.playing11.slice(5) : bowlTeam.playing11.slice(0, 5); // Ensure at least someone bowls
 
-    // Card Data for Scorecard
-    const batCard = battingLineup.map((p) => ({
+    // Initialize Cards
+    // CLONE playing11 to avoid permanent mutation, but respect order
+    const battingOrder = [...batTeam.playing11];
+    
+    // Track Impact Usage Local to Innings
+    let impactUsed = false;
+
+    const batCard = battingOrder.map((p) => ({
       name: p.name,
-      runs: 0,
-      balls: 0,
-      fours: 0,
-      sixes: 0,
-      status: "dnb",
+      runs: 0, 
+      balls: 0, 
+      fours: 0, 
+      sixes: 0, 
+      status: "dnb"
     }));
+    
+    // Set Openers
+    if(batCard[strikerIndex]) batCard[strikerIndex].status = "not out";
+    if(batCard[nonStrikerIndex]) batCard[nonStrikerIndex].status = "not out";
 
-    const bowlCardMap = {}; // Helper to track bowler stats
+    const bowlCardMap = {}; 
+    let score = 0;
+    let wickets = 0;
+    let ballLog = [];
+    let isFreeHit = false;
 
-    let score = 0,
-      wickets = 0,
-      balls = 0;
-    let strikerIdx = 0,
-      nonStrikerIdx = 1;
+    // --- OVER LOOP ---
+    for (let over = 0; over < 20; over++) {
+       if (wickets >= 10 || (target && score > target)) break;
 
-    batCard[strikerIdx].status = "not out";
-    if (batCard[nonStrikerIdx]) batCard[nonStrikerIdx].status = "not out";
+       // Select Bowler
+       const bowlerObj = validBowlers[over % validBowlers.length];
+       if (!bowlCardMap[bowlerObj.name]) {
+           bowlCardMap[bowlerObj.name] = { name: bowlerObj.name, runs: 0, wkts: 0, balls: 0, economy: 0 };
+       }
+       const bowlerStats = bowlCardMap[bowlerObj.name];
 
-    for (let ball = 1; ball <= 120; ball++) {
-      // Safety check: Stop if wickets exceed available batters (e.g. squad < 11)
-      if (wickets >= 10 || wickets >= batCard.length - 1 || (target && score > target)) break;
+       // Phase Logic
+       let phase = "middle";
+       if (over < 6) phase = "powerplay";
+       if (over >= 15) phase = "death";
 
-      const currentBatsman = batCard[strikerIdx];
-      const originalBatsmanObj = battingLineup[strikerIdx];
+       let balls = 0;
+       
+       // --- BALL LOOP ---
+       while (balls < 6) {
+           if (wickets >= 10 || (target && score > target)) break;
 
-      // Rotate Bowlers (Max 4 overs limit)
-      let bowlerIndex = Math.floor((ball - 1) / 6) % bowlers.length;
-      let bowlerObj = bowlers[bowlerIndex];
+           const striker = battingOrder[strikerIndex];
+           if(!striker) break; // Should not happen if logic matches
+           const strikerStats = batCard[strikerIndex];
 
-      // Find valid bowler (check quota)
-      let attempts = 0;
-      while (attempts < bowlers.length) {
-        const bName = bowlerObj.name;
-        // Init stats if needed to check usage
-        if (!bowlCardMap[bName]) {
-          bowlCardMap[bName] = {
-            name: bName,
-            runs: 0,
-            wkts: 0,
-            balls: 0,
-            economy: 0,
-          };
-        }
-        
-        if (bowlCardMap[bName].balls < 24) {
-          break; // Found valid bowler
-        }
-        
-        // Try next bowler
-        bowlerIndex = (bowlerIndex + 1) % bowlers.length;
-        bowlerObj = bowlers[bowlerIndex];
-        attempts++;
-      }
-
-      // Fallback: If all main bowlers exhausted, find ANYONE who can bowl
-      if (attempts >= bowlers.length) {
-          const partTimer = bowlTeam.playing11.find(p => {
-              const bg = bowlCardMap[p.name];
-              return !bg || bg.balls < 24;
-          });
-          if (partTimer) {
-             bowlerObj = partTimer;
-          } else {
-             // Absolute worst case: Allow overflow
-             bowlerObj = bowlers[0]; 
-          }
-           // Ensure stats exist for safety
-           if (!bowlCardMap[bowlerObj.name]) {
-              bowlCardMap[bowlerObj.name] = {
-                  name: bowlerObj.name,
-                  runs: 0, wkts: 0, balls: 0, economy: 0
-              };
+           // AGGRESSION BIAS
+           const wicketTakerBias = (bowlerObj.bowl > 85) ? 2 : (bowlerObj.bowl > 75 ? 1 : 0);
+           
+           const result = simulateBall(striker, bowlerObj, phase, pitch);
+           
+           // FREE HIT LOGIC FIX: Wicket does not count on Free Hit
+           if (result.wicket && isFreeHit) {
+               result.wicket = false;
+               result.commentary = "Not Out (Free Hit)";
            }
-      }
-      
-      const bowlerStats = bowlCardMap[bowlerObj.name];
 
-      // --- PLAY BALL ---
-      const context = {
-        over: Math.floor((ball - 1) / 6) + 1,
-        wickets: wickets,
-        requiredRunRate: target
-          ? Math.max(0, (target - score) / (Math.max(1, 120 - (ball - 1)) / 6))
-          : null,
-      };
+           // Log Event
+           ballLog.push({
+             over: `${over}.${balls + 1}`,
+             batsman: striker.name,
+             bowler: bowlerObj.name,
+             runs: result.runs,
+             extra: result.extra,
+             wicket: result.wicket
+           });
 
-      const res = playBall(originalBatsmanObj, bowlerObj, context);
+           score += result.runs;
+           bowlerStats.runs += result.runs;
 
-      currentBatsman.balls++;
-      bowlerStats.balls++;
+           // Legality
+           if (result.legal) {
+               balls++;
+               strikerStats.balls++;
+               bowlerStats.balls++;
+               if (isFreeHit) isFreeHit = false;
+           } else {
+               if (result.extra === "NO BALL") isFreeHit = true;
+               // Wides/Noballs don't increment balls faced/bowled usually, but run counts.
+           }
 
-      if (res.isOut) {
-        wickets++;
-        currentBatsman.status = "out";
-        bowlerStats.wkts++;
+           // Batting Stats (Only runs off bat)
+           if (result.legal || result.extra === "NO BALL") {
+               if (!result.extra) {
+                   strikerStats.runs += result.runs;
+                   if (result.runs === 4) { strikerStats.fours++; getPlayerStat(striker.name).fours++; }
+                   if (result.runs === 6) { strikerStats.sixes++; getPlayerStat(striker.name).sixes++; }
+                   getPlayerStat(striker.name).runs += result.runs;
+                   getPlayerStat(striker.name).pts += result.runs;
+               }
+           }
+           
+           // WICKET
+           if (result.wicket) {
+                wickets++;
+                strikerStats.status = "out";
+                bowlerStats.wkts++;
+                getPlayerStat(bowlerObj.name).wkts++;
+                getPlayerStat(bowlerObj.name).pts += 25;
+                
+                if (nextBatsmanIndex < battingOrder.length) {
+                    strikerIndex = nextBatsmanIndex++;
+                    if(batCard[strikerIndex]) batCard[strikerIndex].status = "not out";
+                } else {
+                    strikerIndex = -1; // All out mostly
+                }
+           } 
+           // RUNS RUNNING (Strike Rotate)
+           else {
+               if (result.runs % 2 === 1) {
+                   if (nonStrikerIndex !== -1 && strikerIndex !== -1) {
+                       [strikerIndex, nonStrikerIndex] = [nonStrikerIndex, strikerIndex];
+                   }
+               }
+           }
+       } // balls loop
+       
+       // End Over Swap
+       if (nonStrikerIndex !== -1 && strikerIndex !== -1) {
+           [strikerIndex, nonStrikerIndex] = [nonStrikerIndex, strikerIndex];
+       }
+       
+       // --- IMPACT PLAYER LOGIC ---
+       if (over >= 9 && !impactUsed && batTeam.impact && batCard[10].status === "dnb") {
+            const impactPlayer = batTeam.impact;
+            battingOrder[10] = impactPlayer; 
+            batCard[10].name = impactPlayer.name;
+            batCard[10].runs = 0; 
+            batCard[10].balls = 0;
+            batCard[10].status = "not out";
+            impactUsed = true;
+       }
 
-        // Update Global Stats
-        getPlayerStat(bowlerObj.name).wkts++;
-        getPlayerStat(bowlerObj.name).pts += 25;
+    } // over loop
 
-        // Next Batsman
-        // Next Batsman (Logic: Wickets count = previous outs + 1 current out. 
-        // So new batter index = wickets + 1, because 0 and 1 were openers)
-        strikerIdx = Math.min(wickets + 1, batCard.length - 1);
-        if (batCard[strikerIdx]) batCard[strikerIdx].status = "not out";
-      } else {
-        score += res.runs;
-        currentBatsman.runs += res.runs;
-        bowlerStats.runs += res.runs;
+    // Calculate Actual Balls Bowled for Stats
+    const totalLegalBalls = bowlCardMap && Object.values(bowlCardMap).reduce((acc, b) => acc + b.balls, 0);
 
-        // Update Global Stats
-        const pStat = getPlayerStat(currentBatsman.name);
-        pStat.runs += res.runs;
-        pStat.pts += res.runs;
-
-        if (res.type === "four") {
-          currentBatsman.fours++;
-          pStat.fours++;
-          pStat.pts += 1;
-        }
-        if (res.type === "six") {
-          currentBatsman.sixes++;
-          pStat.sixes++;
-          pStat.pts += 2;
-        }
-
-        // Swap Strike
-        if (res.runs % 2 !== 0) {
-          [strikerIdx, nonStrikerIdx] = [nonStrikerIdx, strikerIdx];
-        }
-      }
-
-      // Over End Swap
-      if (ball % 6 === 0) {
-        [strikerIdx, nonStrikerIdx] = [nonStrikerIdx, strikerIdx];
-      }
-    }
-
-    // Convert Map to Array for Scorecard
+    // Format Bowling Card
     const bowlCard = Object.values(bowlCardMap);
     bowlCard.forEach((b) => {
       b.oversDisplay = `${Math.floor(b.balls / 6)}.${b.balls % 6}`;
-      b.economy = (b.runs / (b.balls / 6 || 1)).toFixed(1);
+      b.economy = b.balls > 0 ? (b.runs / (b.balls / 6)).toFixed(1) : "0.0";
     });
 
     return {
       score,
       wickets,
-      balls,
+      balls: totalLegalBalls || 0, 
       bat: batCard,
       bowl: bowlCard,
       team: batTeam.name,
+      ballLog
     };
   }
 
   function playMatch(t1, t2, type) {
-    // Determine Pitch Condition: 25% Bowling, 75% Batting (Flat)
-    const pitchType = Math.random() < 0.25 ? "bowling" : "flat";
+    // Determine Pitch Condition: 33% Each (Bat/Bowl/Common)
+    const r = Math.random();
+    let pitch = PITCH_TYPES.COMMON;
+    if (r < 0.33) pitch = PITCH_TYPES.BATTING;
+    else if (r < 0.66) pitch = PITCH_TYPES.BOWLING;
     
-    const i1 = simulateInnings(t1, t2, null, pitchType);
-    const i2 = simulateInnings(t2, t1, i1.score, pitchType);
+    const i1 = simulateInnings(t1, t2, null, pitch);
+    const i2 = simulateInnings(t2, t1, i1.score + 1, pitch);
 
     let winnerName = i2.score > i1.score ? t2.name : t1.name;
     if (i1.score === i2.score) winnerName = t1.name; // Simple tie-break
@@ -962,14 +1009,11 @@ function runNewLogicSimulation(teams) {
       const loser = [t1, t2].find((t) => t.name !== winnerName);
 
       winner.stats.played++;
-      winner.stats.p++;
       winner.stats.won++;
-      winner.stats.w++;
       winner.stats.pts += 2;
+
       loser.stats.played++;
-      loser.stats.p++;
       loser.stats.lost++;
-      loser.stats.l++;
 
       // NRR Calc helpers
       winner.stats.runsScored += winner === t1 ? i1.score : i2.score;
