@@ -22,7 +22,26 @@ let isSoundEnabled = false;
 let audioCtx = null;
 let synthesisVoice = null;
 let lastAnnouncedLotId = -1;
+let lastAnnouncedSet = null;
 let knownTakenTeams = new Set();
+
+// Helper function to convert role key to full name for voice
+function getRoleFullName(roleKey) {
+  const roleMap = {
+    'wk': 'Wicket Keeper',
+    'bat': 'Batsman',
+    'bowl': 'Bowler',
+    'ar': 'All-rounder',
+    'allrounder': 'All-rounder'
+  };
+  return roleMap[roleKey.toLowerCase()] || roleKey;
+}
+
+// Helper function to convert player type
+function getPlayerTypeFullName(playerType) {
+  if (playerType === 'Foreign') return 'Overseas Player';
+  return 'Domestic Player';
+}
 
 // Initialize Sound Toggle
 document.addEventListener("DOMContentLoaded", () => {
@@ -1751,10 +1770,24 @@ socket.on("update_lot", (data) => {
 
   if (lastAnnouncedLotId !== data.lotNumber) {
     lastAnnouncedLotId = data.lotNumber;
+    
+    // Build announcement text
+    let announcement = "";
+    
+    // Check if set has changed - announce the new set
+    if (lastAnnouncedSet !== p.category) {
+      lastAnnouncedSet = p.category;
+      announcement = `${p.category} Set. `;
+    }
+    
+    // Player details
+    const roleName = getRoleFullName(p.roleKey);
+    const playerTypeName = getPlayerTypeFullName(p.playerType);
     const priceInCrores = (p.basePrice / 10000000).toFixed(2);
-    speakText(
-      `Next player. ${p.name}. ${p.roleKey}. Base price ${priceInCrores} crore rupees.`
-    );
+    
+    announcement += `Next player. ${p.name}. ${roleName}. ${playerTypeName}. Base price ${priceInCrores} crore rupees.`;
+    
+    speakText(announcement);
   }
 });
 
@@ -1803,9 +1836,9 @@ socket.on("bid_update", (data) => {
   logEvent(`${data.team.name} bids ${formatAmount(data.amount)}`);
   playBidSound();
   
-  // Voice announcement for bid
+  // Voice announcement for bid (only amount, no team name)
   const bidInCrores = (data.amount / 10000000).toFixed(2);
-  speakText(`${data.team.name}. ${bidInCrores} crores.`);
+  speakText(`${bidInCrores} crores.`);
 });
 
 // 🛑 SUBMIT BID (FIXED LOGIC)
