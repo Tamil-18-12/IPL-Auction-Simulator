@@ -1,3 +1,4 @@
+
 :root {
   /* Color Palette */
   --bg-deep: #050505;
@@ -1638,4 +1639,154 @@ h5,
 #scorecardModal table {
   background: #0b0b0b;
   border-radius: 8px;
+}
+
+/* ===================================
+   LIVE CHAT & LOG RESPONSIVE LAYOUT
+   =================================== */
+
+/* Container for Chat + Log */
+.chat-log-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+}
+
+/* Chat Panel */
+.chat-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Log Panel */
+.log-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Chat Messages Area */
+#chatMessages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Chat Message Bubble */
+.chat-message {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 3px solid #ffd700;
+  animation: slideIn 0.3s ease-out;
+}
+
+.chat-message .chat-name {
+  color: #00e676;
+  font-weight: bold;
+  font-size: 0.85rem;
+  margin-bottom: 2px;
+}
+
+.chat-message .chat-text {
+  color: #ddd;
+  font-size: 0.9rem;
+  word-wrap: break-word;
+}
+
+.chat-message .chat-time {
+  color: #666;
+  font-size: 0.7rem;
+  margin-top: 2px;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Chat Input Container */
+.chat-input-container {
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+#chatInput {
+  flex: 1;
+}
+
+#chatInput:focus {
+  border-color: #ffd700;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
+  outline: none;
+}
+
+#sendChatBtn {
+  flex-shrink: 0;
+  transition: all 0.3s;
+}
+
+#sendChatBtn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 15px rgba(255, 193, 7, 0.5);
+}
+
+/* ===================================
+   RESPONSIVE LAYOUT
+   =================================== */
+
+/* Desktop: Top 50% Chat, Bottom 50% Log */
+@media (min-width: 769px) {
+  .chat-log-container {
+    flex-direction: column;
+  }
+  
+  .chat-panel,
+  .log-panel {
+    height: 50%;
+  }
+}
+
+/* Mobile: Left 50% Chat, Right 50% Log */
+@media (max-width: 768px) {
+  .chat-log-container {
+    flex-direction: row;
+  }
+  
+  .chat-panel,
+  .log-panel {
+    width: 50%;
+    height: 100%;
+  }
+  
+  /* Adjust font sizes for mobile */
+  .chat-message .chat-name {
+    font-size: 0.75rem;
+  }
+  
+  .chat-message .chat-text {
+    font-size: 0.8rem;
+  }
+  
+  #chatInput {
+    font-size: 0.85rem;
+  }
+  
+  #sendChatBtn {
+    width: 35px;
+    height: 35px;
+  }
 }
