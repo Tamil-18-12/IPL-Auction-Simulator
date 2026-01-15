@@ -68,6 +68,7 @@
         .broken-text span {
             display: inline-block;
             background: linear-gradient(to bottom, #fff 0%, #ffd700 50%, #b8860b 100%);
+            background-clip: text;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.5));
@@ -565,6 +566,30 @@
 
                         <div class="workflow-card">
                             <div class="card-bg-number">05</div>
+                            <div class="card-icon-box"><i class="bi bi-mic-fill"></i></div>
+                            <div class="card-title">VOICE CHAT</div>
+                            <p class="card-desc">Talk to other players in real-time using your microphone. WebRTC
+                                peer-to-peer voice communication.</p>
+                        </div>
+
+                        <div class="workflow-card">
+                            <div class="card-bg-number">06</div>
+                            <div class="card-icon-box"><i class="bi bi-chat-dots-fill"></i></div>
+                            <div class="card-title">LIVE CHAT</div>
+                            <p class="card-desc">Send text messages to all players. Coordinate strategies and celebrate
+                                victories together.</p>
+                        </div>
+
+                        <div class="workflow-card">
+                            <div class="card-bg-number">07</div>
+                            <div class="card-icon-box"><i class="bi bi-person-badge-fill"></i></div>
+                            <div class="card-title">PLAYER NAMES</div>
+                            <p class="card-desc">Enter your name and see it displayed next to your team. Full
+                                personalization for each player.</p>
+                        </div>
+
+                        <div class="workflow-card">
+                            <div class="card-bg-number">08</div>
                             <div class="card-icon-box"><i class="bi bi-person-check-fill"></i></div>
                             <div class="card-title">SQUAD BUILD</div>
                             <p class="card-desc">Select your Playing XI and Impact Player order-wise from the players
@@ -572,7 +597,7 @@
                         </div>
 
                         <div class="workflow-card">
-                            <div class="card-bg-number">06</div>
+                            <div class="card-bg-number">09</div>
                             <div class="card-icon-box"><i class="bi bi-cpu-fill"></i></div>
                             <div class="card-title">AI SIMULATION</div>
                             <p class="card-desc">Advanced algorithm simulates the entire tournament match-by-match based
@@ -580,7 +605,7 @@
                         </div>
 
                         <div class="workflow-card">
-                            <div class="card-bg-number">07</div>
+                            <div class="card-bg-number">10</div>
                             <div class="card-icon-box"><i class="bi bi-trophy-fill"></i></div>
                             <div class="card-title">CHAMPIONS</div>
                             <p class="card-desc">The team with the best performance wins the trophy. Runner-ups and
@@ -588,7 +613,7 @@
                         </div>
 
                         <div class="workflow-card">
-                            <div class="card-bg-number">08</div>
+                            <div class="card-bg-number">11</div>
                             <div class="card-icon-box"><i class="bi bi-graph-up-arrow"></i></div>
                             <div class="card-title">DETAILED STATS</div>
                             <p class="card-desc">Complete post-game analysis: Orange Cap, Purple Cap, MVP Leaderboard,
@@ -612,15 +637,35 @@
                     <ul class="list-group list-group-flush bg-transparent">
                         <li class="list-group-item bg-transparent text-white border-secondary">
                             <i class="bi bi-cash-stack text-success me-2"></i>
-                            <strong>Purse Limit:</strong> Each team has a fixed budget (e.g., ₹100 Cr). Don't go broke!
+                            <strong>Purse Limit:</strong> Host selects team budget (₹80/90/100/120/130 Cr). All teams
+                            get same amount.
                         </li>
                         <li class="list-group-item bg-transparent text-white border-secondary">
                             <i class="bi bi-people-fill text-info me-2"></i>
-                            <strong>Squad Size:</strong> Minimum 18 players, Maximum 25 players.
+                            <strong>Squad Size:</strong> Minimum 18 players, Maximum 25 players per team.
                         </li>
                         <li class="list-group-item bg-transparent text-white border-secondary">
                             <i class="bi bi-globe text-primary me-2"></i>
-                            <strong>Foreign Players:</strong> Maximum 8 overseas players per squad.
+                            <strong>Foreign Players:</strong> Maximum 8 overseas players in squad, max 4 in Playing XI.
+                        </li>
+                        <li class="list-group-item bg-transparent text-white border-secondary">
+                            <i class="bi bi-person-check-fill text-warning me-2"></i>
+                            <strong>Playing XI:</strong> Select exactly 12 players + 1 Captain + 2 Impact Players (Bat &
+                            Bowl).
+                        </li>
+                        <li class="list-group-item bg-transparent text-white border-secondary">
+                            <i class="bi bi-hammer text-danger me-2"></i>
+                            <strong>Bidding:</strong> First bid = Base price. Next bids = +₹25 Lakh. 10-sec timer. Host
+                            controls.
+                        </li>
+                        <li class="list-group-item bg-transparent text-white border-secondary">
+                            <i class="bi bi-mic-fill text-success me-2"></i>
+                            <strong>Communication:</strong> Use Voice Chat (🎤) and Live Chat (💬) to coordinate with
+                            players.
+                        </li>
+                        <li class="list-group-item bg-transparent text-white border-secondary">
+                            <i class="bi bi-trophy-fill text-warning me-2"></i>
+                            <strong>Tournament:</strong> AI simulates full IPL season. Best team wins the trophy!
                         </li>
                     </ul>
                 </div>
@@ -809,7 +854,13 @@
                 <button id="soundToggleBtn" class="btn btn-sm btn-outline-light rounded-0 ms-2">
                     <i class="bi bi-volume-mute-fill"></i>
                 </button>
+                <button id="micToggleBtn" class="btn btn-sm btn-outline-danger rounded-0" title="Voice Chat">
+                    <i class="bi bi-mic-mute-fill"></i>
+                </button>
                 <span id="adminControls" class="admin-only d-flex gap-2">
+                    <!-- <button id="autoTestBtn" class="btn btn-sm btn-outline-danger" style="border-style:dashed;">
+                        <i class="bi bi-robot"></i> AUTO
+                    </button> -->
                     <button id="endAuctionBtn" class="btn-custom btn-action btn-end-auction">END</button>
                     <button id="timerToggleBtn" class="btn-custom btn-action"><i class="bi bi-pause-fill"></i></button>
                 </span>
@@ -834,12 +885,39 @@
                         </div>
                     </div>
 
+                    <!-- Name Entry Section -->
+                    <div id="nameEntrySection" class="mb-4 p-4 border border-warning rounded"
+                        style="background: rgba(255, 193, 7, 0.1); display: none;">
+                        <h5 class="text-warning mb-3 text-center">
+                            <i class="bi bi-person-circle me-2"></i>ENTER YOUR NAME
+                        </h5>
+                        <div class="row justify-content-center">
+                            <div class="col-md-6">
+                                <input type="text" id="lobbyPlayerName"
+                                    class="form-control form-control-lg text-center bg-dark text-white border-warning"
+                                    placeholder="Type your name and press Enter" maxlength="20"
+                                    style="font-size: 1.5rem; letter-spacing: 2px;">
+                                <small class="text-white-50 d-block text-center mt-2">
+                                    Press Enter to save your name
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="hostSettings" class="admin-only row g-2 mb-3 border-bottom border-secondary pb-3">
                         <div class="col-12">
                             <h5 class="text-warning">Game Settings (Host Only)</h5>
                         </div>
-                        <div class="col-6"><label class="text-white-50 small">Purse (INR)</label><input id="budget"
-                                type="number" class="form-control form-control-dark" value="1000000000"></div>
+                        <div class="col-6">
+                            <label class="text-white-50 small">Team Purse</label>
+                            <select id="budget" class="form-select form-control-dark" onchange="updateAllTeamBudgets()">
+                                <option value="800000000">₹80 Crore</option>
+                                <option value="900000000">₹90 Crore</option>
+                                <option value="1000000000" selected>₹100 Crore</option>
+                                <option value="1200000000">₹120 Crore</option>
+                                <option value="1300000000">₹130 Crore</option>
+                            </select>
+                        </div>
                         <div class="col-6"><label class="text-white-50 small">Min Increment</label><input id="increment"
                                 type="number" class="form-control form-control-dark" value="2500000">
                         </div>
@@ -872,11 +950,40 @@
 
             <div id="auctionDashboard" class="dashboard-row" style="display: none;">
                 <div class="col-side">
-                    <div class="glass-panel">
-                        <div class="p-2 border-bottom border-secondary bg-black bg-opacity-25">
-                            <h5 class="mb-0 text-white"><i class="bi bi-terminal me-2"></i>LIVE LOG</h5>
+                    <!-- Live Chat & Log Container -->
+                    <div class="chat-log-container">
+                        <!-- Live Chat Section -->
+                        <div class="glass-panel chat-panel">
+                            <div class="p-2 border-bottom border-secondary bg-black bg-opacity-25">
+                                <h5 class="mb-0 text-white"><i class="bi bi-chat-dots me-2"></i>LIVE CHAT</h5>
+                            </div>
+                            <div id="chatMessages" class="scroll-area small text-white-50"
+                                style="height: calc(100% - 100px); overflow-y: auto; padding: 10px;">
+                                <div class="text-center text-white-50 small mb-2">
+                                    Welcome to the auction room!<br>
+                                    Chat with other bidders here.
+                                </div>
+                            </div>
+                            <div class="chat-input-container p-2 border-top border-secondary">
+                                <div class="d-flex gap-2">
+                                    <input type="text" id="chatInput"
+                                        class="form-control form-control-sm bg-dark text-white border-secondary"
+                                        placeholder="Type a message..." maxlength="200" style="border-radius: 20px;">
+                                    <button id="sendChatBtn" class="btn btn-warning btn-sm"
+                                        style="border-radius: 50%; width: 40px; height: 40px; padding: 0;">
+                                        <i class="bi bi-send-fill"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <div id="log" class="scroll-area small font-monospace text-white-50"></div>
+
+                        <!-- Live Log Section -->
+                        <div class="glass-panel log-panel">
+                            <div class="p-2 border-bottom border-secondary bg-black bg-opacity-25">
+                                <h5 class="mb-0 text-white"><i class="bi bi-terminal me-2"></i>LIVE LOG</h5>
+                            </div>
+                            <div id="log" class="scroll-area small font-monospace text-white-50"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -1034,10 +1141,17 @@
                     sparkContainer.appendChild(spark);
                 }
             }
+
+
+            // Show Lobby Screen as Intro Fades
+            setTimeout(() => {
+                const lobby = document.getElementById('lobbyScreen');
+                if (lobby) lobby.style.display = 'flex';
+            }, 4000);
         });
     </script>
     <script src="script.js"></script>
+    <script src="voice-chat.js"></script>
 </body>
 
 </html>
-
