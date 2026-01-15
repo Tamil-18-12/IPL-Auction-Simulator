@@ -3,14 +3,16 @@
 // ======================================================
 // 🔧 0. PERSISTENT IDENTITY (THE WRISTBAND)
 // ======================================================
-let myPersistentId = localStorage.getItem("ipl_auction_player_id");
+let myPersistentId = sessionStorage.getItem("ipl_auction_player_id");
 
 if (!myPersistentId) {
   myPersistentId =
     "user_" + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
-  localStorage.setItem("ipl_auction_player_id", myPersistentId);
+  sessionStorage.setItem("ipl_auction_player_id", myPersistentId);
 }
 
+// Player Name Storage
+let myPlayerName = sessionStorage.getItem("ipl_auction_player_name") || "";
 
 
 // ======================================================
@@ -24,14 +26,22 @@ let knownTakenTeams = new Set();
 
 // Initialize Sound Toggle
 document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("soundToggleBtn");
-
   loadVoices();
   if (window.speechSynthesis.onvoiceschanged !== undefined) {
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }
 
-  if (btn) {
+  // Initialize audio button when it becomes available
+  initializeSoundButton();
+});
+
+// Function to initialize sound button (can be called multiple times safely)
+function initializeSoundButton() {
+  const btn = document.getElementById("soundToggleBtn");
+  
+  if (btn && !btn.dataset.initialized) {
+    btn.dataset.initialized = "true"; // Mark as initialized
+    
     btn.addEventListener("click", () => {
       isSoundEnabled = !isSoundEnabled;
       btn.classList.toggle("active", isSoundEnabled);
@@ -49,10 +59,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         playHammerSound(); // Test the heavy hammer
         speakText("Audio system active.");
+      } else {
+        speakText("Audio system disabled.");
       }
     });
   }
-});
+}
 
 function loadVoices() {
   const voices = window.speechSynthesis.getVoices();
@@ -1134,10 +1146,12 @@ function getPlayerStats(name, roleHint = "bat") {
 document.getElementById("doCreateBtn").addEventListener("click", () => {
   if (!socketAlive)
     return (lobbyError.innerText = "Connection lost. Reconnecting...");
+  
   const roomId = document.getElementById("createRoomId").value.toUpperCase();
   const pass = document.getElementById("createPass").value;
+  
   if (!roomId || pass.length !== 4)
-    return (lobbyError.innerText = "Invalid Details");
+    return (lobbyError.innerText = "Invalid Room ID or Password");
 
   localStorage.setItem("ipl_last_room", roomId);
   localStorage.setItem("ipl_last_pass", pass);
@@ -1149,8 +1163,10 @@ document.getElementById("doCreateBtn").addEventListener("click", () => {
 document.getElementById("doJoinBtn").addEventListener("click", () => {
   if (!socketAlive)
     return (lobbyError.innerText = "Connection lost. Reconnecting...");
+  
   const roomId = document.getElementById("joinRoomId").value.toUpperCase();
   const pass = document.getElementById("joinPass").value;
+  
   if (!roomId || pass.length !== 4)
     return (lobbyError.innerText = "Check Credentials");
 
@@ -1170,6 +1186,18 @@ socket.on("roomcreated", (roomId) => {
   document.getElementById("waitingText").style.display = "none";
   document.getElementById("startBtn").style.display = "block";
   initLobbyState();
+  
+  // Always show name entry for confirmation
+  setTimeout(() => {
+    const nameSection = document.getElementById("nameEntrySection");
+    const nameInput = document.getElementById("lobbyPlayerName");
+    if (nameSection) {
+      nameSection.style.display = "block";
+      if (nameInput && myPlayerName) {
+        nameInput.value = myPlayerName;
+      }
+    }
+  }, 300);
 });
 
 socket.off("room_joined");
@@ -1207,6 +1235,18 @@ socket.on("room_joined", (data) => {
 
     renderLobbyTeams();
   }
+  
+  // Always show name entry for confirmation
+  setTimeout(() => {
+    const nameSection = document.getElementById("nameEntrySection");
+    const nameInput = document.getElementById("lobbyPlayerName");
+    if (nameSection) {
+      nameSection.style.display = "block";
+      if (nameInput && myPlayerName) {
+        nameInput.value = myPlayerName;
+      }
+    }
+  }, 300);
 
   if (data.state && data.state.isActive) {
     auctionStarted = true;
@@ -1230,6 +1270,24 @@ function initLobbyState() {
   });
   socket.emit("update_lobby_teams", globalTeams);
   renderLobbyTeams();
+}
+
+// Update all team budgets when admin changes purse amount
+window.updateAllTeamBudgets = function() {
+  if (!isAdmin) return;
+  
+  const newBudget = parseInt(document.getElementById("budget").value);
+  
+  // Update all teams' budgets
+  globalTeams.forEach(team => {
+    team.budget = newBudget;
+  });
+  
+  // Broadcast to all players
+  socket.emit("update_lobby_teams", globalTeams);
+  renderLobbyTeams();
+  
+  logEvent(`💰 Host changed team purse to ${formatAmount(newBudget)}`, true);
 }
 
 // FIX: Add missing sync_data listener
@@ -1344,6 +1402,11 @@ function renderLobbyTeams() {
     let nameInput = isAdmin
       ? `<input type="text" class="form-control form-control-sm text-center bg-dark text-white border-secondary" value="${safeName}" onchange="adminRenameTeam('${t.bidKey}', this.value)">`
       : `<div class="fs-4 fw-bold text-white">${safeName}</div>`;
+    
+    // Display player name if team is taken
+    const playerNameDisplay = t.playerName 
+      ? `<div class="small text-warning mt-1" style="font-size: 0.85rem;">${t.playerName}</div>` 
+      : '';
 
     container.innerHTML += `<div class="lobby-team-card ${statusClass}" ${clickAction}><span class="lobby-status-badge ${
       statusClass === "available"
@@ -1351,7 +1414,7 @@ function renderLobbyTeams() {
         : statusClass === "my-choice"
         ? "bg-warning text-dark"
         : "bg-danger"
-    }">${statusText}</span>${nameInput}<div class="small text-white-50">Budget: ${formatAmount(
+    }">${statusText}</span>${nameInput}${playerNameDisplay}<div class="small text-white-50">Budget: ${formatAmount(
       t.budget
     )}</div></div>`;
   });
@@ -1392,7 +1455,7 @@ socket.on("auction_started", (data) => {
   auctionQueue = data.queue;
   logEvent(`<strong>AUCTION STARTED</strong>`, true);
   playHammerSound();
-  speakText("Ladies and Gentlemen, the IPL Auction is starting now.");
+  speakText("Ladies and Gentlemen, welcome to the IPL Mega Auction. Let the bidding begin!");
 });
 
 function enterGame(roomId) {
@@ -1401,6 +1464,9 @@ function enterGame(roomId) {
   lobbyScreen.style.display = "none";
   gameContainer.style.display = "block";
   document.getElementById("setupSection").style.display = "flex";
+  
+  // Initialize sound button now that gameContainer is visible
+  initializeSoundButton();
 }
 
 function claimLobbyTeam(key) {
@@ -1408,7 +1474,39 @@ function claimLobbyTeam(key) {
     alert("You have already joined a team!");
     return;
   }
-  socket.emit("claim_lobby_team", key);
+  
+  // Check if name input field has a value (user might not have pressed Enter yet)
+  const nameInput = document.getElementById("lobbyPlayerName");
+  if (nameInput && nameInput.value.trim()) {
+    const name = nameInput.value.trim();
+    myPlayerName = name;
+    sessionStorage.setItem("ipl_auction_player_name", name);
+    
+    // Hide name entry section
+    const nameSection = document.getElementById("nameEntrySection");
+    if (nameSection) {
+      nameSection.style.display = "none";
+    }
+  }
+  
+  // Send player name to server first if we have one
+  if (myPlayerName) {
+    socket.emit("update_player_name", { playerName: myPlayerName });
+  } else {
+    // If no name is set, prompt user
+    alert("Please enter your name first!");
+    const nameSection = document.getElementById("nameEntrySection");
+    if (nameSection) {
+      nameSection.style.display = "block";
+      if (nameInput) nameInput.focus();
+    }
+    return;
+  }
+  
+  // Small delay to ensure name is received before claiming
+  setTimeout(() => {
+    socket.emit("claim_lobby_team", key);
+  }, 100);
 }
 
 function requestReclaim(bidKey) {
@@ -1643,10 +1741,8 @@ socket.on("update_lot", (data) => {
   bidBtn.disabled = false;
   updateBidControlsState(p);
 
-  const initialInc = parseInt(document.getElementById("customBidInput").value);
-  bidBtn.innerHTML = `BID (+${formatAmount(
-    initialInc
-  )}) <i class="bi bi-hammer"></i>`;
+  // For first bid, show base price only. For subsequent bids, show increment
+  bidBtn.innerHTML = `BID ${formatAmount(data.currentBid)} <i class="bi bi-hammer"></i>`;
   bidBtn.style.background = "";
   bidBtn.style.color = "";
 
@@ -1655,10 +1751,9 @@ socket.on("update_lot", (data) => {
 
   if (lastAnnouncedLotId !== data.lotNumber) {
     lastAnnouncedLotId = data.lotNumber;
+    const priceInCrores = (p.basePrice / 10000000).toFixed(2);
     speakText(
-      `Lot ${data.lotNumber}. ${p.name}. Base price ${formatAmount(
-        p.basePrice
-      )}.`
+      `Next player. ${p.name}. ${p.roleKey}. Base price ${priceInCrores} crore rupees.`
     );
   }
 });
@@ -1707,6 +1802,10 @@ socket.on("bid_update", (data) => {
   updateTeamSidebar(globalTeams);
   logEvent(`${data.team.name} bids ${formatAmount(data.amount)}`);
   playBidSound();
+  
+  // Voice announcement for bid
+  const bidInCrores = (data.amount / 10000000).toFixed(2);
+  speakText(`${data.team.name}. ${bidInCrores} crores.`);
 });
 
 // 🛑 SUBMIT BID (FIXED LOGIC)
@@ -1740,15 +1839,22 @@ function submitMyBid() {
     }
   }
 
-  // FIXED: Logic to increase amount correctly
+  // FIXED: Logic for first bid vs subsequent bids
   const currentBidText = document.getElementById("pBid").innerText;
   const inc = parseInt(document.getElementById("customBidInput").value);
 
-  const parsed = parsePrice(currentBidText);
-  // FIX: If parsed is 0 (e.g. "₹-"), we MUST use basePrice.
-  // If parsed > 0, we use it.
-  const current = parsed > 0 ? parsed : currentActivePlayer.basePrice;
-  const bidAmount = current + inc;
+  let bidAmount;
+  
+  // Check if this is the FIRST bid (no one has bid yet)
+  if (currentHighestBidderKey === null) {
+    // First bid = exactly base price (no increment)
+    bidAmount = currentActivePlayer.basePrice;
+  } else {
+    // Subsequent bids = current bid + increment
+    const parsed = parsePrice(currentBidText);
+    const current = parsed > 0 ? parsed : currentActivePlayer.basePrice;
+    bidAmount = current + inc;
+  }
 
   if (myTeam.budget < bidAmount) {
     alert("INSUFFICIENT BUDGET!");
@@ -1765,11 +1871,24 @@ function submitMyBid() {
 document.getElementById("placeBidBtn").addEventListener("click", submitMyBid);
 document.addEventListener("keydown", (e) => {
   if (lobbyScreen.style.display !== "none") return;
+  
+  // Prevent actions if typing in an input field (except custom bid)
+  if(document.activeElement.tagName === "INPUT" && document.activeElement.id !== "customBidInput") return;
+
+  // BID SHORTCUTS (Space/Enter)
   if (e.code === "Space" || e.code === "Enter") {
-    // PREVENT ACCIDENTAL BID WHILE TYPING IN OTHER INPUTS
-    if(document.activeElement.tagName === "INPUT" && document.activeElement.id !== "customBidInput") return;
     e.preventDefault();
     submitMyBid();
+  }
+
+  // HOST SHORTCUTS (S = Sold, U = Unsold/Skip)
+  if (isAdmin) {
+      if (e.key.toLowerCase() === 's') {
+          document.getElementById("soldBtn").click();
+      }
+      if (e.key.toLowerCase() === 'u') {
+          document.getElementById("skipBtn").click();
+      }
   }
 });
 
@@ -1836,8 +1955,9 @@ socket.on("sale_finalized", (data) => {
     stamp.className = "stamp-overlay";
 
     playHammerSound();
+    const priceInCrores = (data.price / 10000000).toFixed(2);
     speakText(
-      `Sold to ${data.soldDetails.soldTeam} for ${formatAmount(data.price)}.`
+      `${data.soldPlayer.name}. Sold to ${data.soldDetails.soldTeam} for ${priceInCrores} crore rupees.`
     );
   } else {
     logEvent(`<strong>UNSOLD:</strong> ${data.soldPlayer.name}`, true);
@@ -1847,7 +1967,7 @@ socket.on("sale_finalized", (data) => {
     stamp.className = "stamp-overlay unsold-stamp";
 
     playHammerSound();
-    speakText("Unsold.");
+    speakText(`${data.soldPlayer.name}. Unsold.`);
   }
   updateTeamSidebar(globalTeams);
   overlay.classList.add("overlay-active");
@@ -1914,12 +2034,19 @@ function updateTeamSidebar(teams) {
       card.id = `team-card-${t.bidKey}`;
       card.className = "franchise-card";
       if (isMine) card.classList.add("my-team");
+      
+      // Display player name if available
+      const playerNameDisplay = t.playerName 
+        ? `<div style="font-size: 0.65rem; color: #888; margin-top: 2px;">${t.playerName}</div>` 
+        : '';
+      
       card.innerHTML = `
                 <div class="f-header">
                     <div class="f-name text-white text-truncate" style="max-width: 120px;">
                         ${t.name} ${
         isMine ? '<i class="bi bi-person-fill text-success"></i>' : ""
       }
+                        ${playerNameDisplay}
                     </div>
                     <div class="f-budget">${formatAmount(t.budget)}</div> 
                 </div>
@@ -2002,17 +2129,33 @@ function updatePauseButtonState(isPaused) {
     : "btn-custom btn-action text-warning border-warning";
 }
 
-let mySelectedSquad11 = [];
-let mySelectedImpact = null;
+let mySelectedSquad = [];
+let myBattingImpact = null;
+let myBowlingImpact = null;
 let mySelectedCaptain = null;
 
+// --- OPEN SQUAD SELECTION ---
 socket.off("open_squad_selection");
-socket.on("open_squad_selection", () => {
+socket.on("open_squad_selection", (data) => {
+  console.log("📢 SQUAD SELECTION OPENED", data);
+  
+  if (data && data.teams) {
+      globalTeams = data.teams;
+      
+      // Auto-recover mySelectedTeamKey if lost/mismatch
+      const myTeam = globalTeams.find(t => t.ownerPlayerId === myPersistentId || t.ownerSocketId === socket.id);
+      if (myTeam) {
+          mySelectedTeamKey = myTeam.bidKey;
+          console.log("✅ Recovered Team Key:", mySelectedTeamKey);
+      }
+  }
+
   document
     .getElementById("squadSelectionScreen")
     .classList.add("overlay-active");
+    
   renderMySquadSelection();
-  speakText("Auction Ended. Please select your Squad.");
+  speakText("The auction has ended. All teams, please select your playing eleven and impact players.");
 });
 
 function countForeigners(list) {
@@ -2038,7 +2181,7 @@ function normalizeTeamStats(team) {
 function clampT20Score(scoreStr) {
   if (!scoreStr) return "0/0";
   const [runs, wkts = "0"] = scoreStr.toString().split("/");
-  const cappedRuns = Math.min(parseInt(runs) || 0, 260);
+  const cappedRuns = Math.min(parseInt(runs) || 0, 280); // Increased cap lightly
   return `${cappedRuns}/${wkts}`;
 }
 
@@ -2053,8 +2196,8 @@ function renderMySquadSelection() {
   const myTeam = globalTeams.find((t) => t.bidKey === mySelectedTeamKey);
   const list = document.getElementById("playing11List");
   const impList = document.getElementById("impactList");
-  list.innerHTML = '<small class="text-warning d-block mb-2 text-center" style="font-size:0.75rem;">Batting Order = Selection Order (1-11)</small>';
-  impList.innerHTML = "";
+  list.innerHTML = '<small class="text-warning d-block mb-2 text-center" style="font-size:0.75rem;">Select 12 Players (Batting Order Priority)</small>';
+  impList.innerHTML = '<small class="text-warning d-block mb-2 text-center" style="font-size:0.75rem;">Assign Roles (Bat Impact & Bowl Impact)</small>';
 
   if (!myTeam || !myTeam.roster || myTeam.roster.length === 0)
     return (list.innerHTML =
@@ -2065,15 +2208,15 @@ function renderMySquadSelection() {
   );
 
   sortedRoster.forEach((p, i) => {
-    const originalIndex = myTeam.roster.indexOf(p); // FIXED: Use reference index
+    const originalIndex = myTeam.roster.indexOf(p);
     const isForeign = p.playerType === "Foreign";
     const badge = isForeign
       ? '<span class="badge bg-danger ms-2" style="font-size:0.6rem">✈️</span>'
       : "";
     const roleIcon = getRoleIcon(p.roleKey);
-    const isSelected = mySelectedSquad11.find((x) => x.name === p.name);
+    const isSelected = mySelectedSquad.find((x) => x.name === p.name);
     const isCapt = mySelectedCaptain === p.name;
-    const num = isSelected ? mySelectedSquad11.indexOf(isSelected) + 1 : "";
+    const num = isSelected ? mySelectedSquad.indexOf(isSelected) + 1 : "";
 
     const captainBtn = isSelected
       ? `<button class="btn btn-sm ${
@@ -2083,43 +2226,67 @@ function renderMySquadSelection() {
         }')">C</button>`
       : "";
 
-    list.innerHTML += `<div class="player-check-card p11-card" id="p11-${originalIndex}" onclick="toggleP11(${originalIndex}, '${p.name}')"><span class="squad-number">${num}</span><div class="fw-bold text-white flex-grow-1">${p.name} <span class="role-icon">${roleIcon}</span> ${badge}</div>${captainBtn}</div>`;
-    impList.innerHTML += `<div class="player-check-card impact-card" id="imp-${originalIndex}" onclick="toggleImpact(${originalIndex}, '${p.name}')"><div class="fw-bold text-white flex-grow-1">${p.name} <span class="role-icon">${roleIcon}</span> ${badge}</div></div>`;
+    list.innerHTML += `<div class="player-check-card p11-card" id="p11-${originalIndex}" onclick="toggleSquadMember(${originalIndex}, '${p.name}')"><span class="squad-number">${num}</span><div class="fw-bold text-white flex-grow-1">${p.name} <span class="role-icon">${roleIcon}</span> ${badge}</div>${captainBtn}</div>`;
   });
+
+  // Render Role Selection (Only from Selected Squad)
+  mySelectedSquad.forEach((p, i) => {
+      const isBatImp = myBattingImpact && myBattingImpact.name === p.name;
+      const isBowlImp = myBowlingImpact && myBowlingImpact.name === p.name;
+      const roleIcon = getRoleIcon(p.roleKey);
+      
+      impList.innerHTML += `
+      <div class="player-check-card impact-card d-flex gap-2 align-items-center p-1" style="cursor:default;">
+         <div class="fw-bold text-white small flex-grow-1 text-truncate">${p.name}</div>
+         <button class="btn btn-xs ${isBatImp ? 'btn-danger' : 'btn-outline-danger'} small-impact-btn" onclick="setBatImpact('${p.name}')">BAT IMP</button>
+         <button class="btn btn-xs ${isBowlImp ? 'btn-primary' : 'btn-outline-primary'} small-impact-btn" onclick="setBowlImpact('${p.name}')">BOWL IMP</button>
+      </div>`;
+  });
+
   updateSquadUI();
 }
 
-function toggleP11(i, name) {
-  // FIXED: Name-based lookup to avoid index desync
+function toggleSquadMember(i, name) {
   const team = globalTeams.find((t) => t.bidKey === mySelectedTeamKey);
   const p = team.roster.find((x) => x.name === name);
   
-  if (!p) return; // safety
-  if (mySelectedImpact && mySelectedImpact.name === name)
-    return alert("Already Impact Player");
-  const idx = mySelectedSquad11.findIndex((x) => x.name === name);
+  if (!p) return; 
+
+  const idx = mySelectedSquad.findIndex((x) => x.name === name);
   if (idx > -1) {
-    mySelectedSquad11.splice(idx, 1);
+    // Remove
+    mySelectedSquad.splice(idx, 1);
+    // Clear roles if removed
     if (mySelectedCaptain === name) mySelectedCaptain = null;
+    if (myBattingImpact && myBattingImpact.name === name) myBattingImpact = null;
+    if (myBowlingImpact && myBowlingImpact.name === name) myBowlingImpact = null;
   } else {
-    if (mySelectedSquad11.length >= 11) return alert("Max 11 Players");
-    const currentForeignCount = countForeigners(mySelectedSquad11);
+    // Add
+    if (mySelectedSquad.length >= 12) return alert("Max 12 Players (11 + Impact Pair)");
+    const currentForeignCount = countForeigners(mySelectedSquad);
     if (p.playerType === "Foreign" && currentForeignCount >= 4)
-      return alert("MAX 4 FOREIGN PLAYERS ALLOWED IN PLAYING XI!");
-    mySelectedSquad11.push(p);
+      return alert("MAX 4 FOREIGN PLAYERS ALLOWED IN SQUAD!");
+    mySelectedSquad.push(p);
   }
   renderMySquadSelection();
 }
 
-function toggleImpact(i, name) {
-  const team = globalTeams.find((t) => t.bidKey === mySelectedTeamKey);
-  const p = team.roster.find((x) => x.name === name);
-  if (!p) return;
-  if (mySelectedSquad11.find((x) => x.name === name))
-    return alert("Already in Playing XI");
-  mySelectedImpact =
-    mySelectedImpact && mySelectedImpact.name === name ? null : p;
-  renderMySquadSelection();
+function setBatImpact(name) {
+    const p = mySelectedSquad.find(x => x.name === name);
+    if(myBowlingImpact && myBowlingImpact.name === name) {
+        myBowlingImpact = null; // Swap roles if clicking same
+    }
+    myBattingImpact = (myBattingImpact && myBattingImpact.name === name) ? null : p;
+    renderMySquadSelection();
+}
+
+function setBowlImpact(name) {
+    const p = mySelectedSquad.find(x => x.name === name);
+    if(myBattingImpact && myBattingImpact.name === name) {
+        myBattingImpact = null;
+    }
+    myBowlingImpact = (myBowlingImpact && myBowlingImpact.name === name) ? null : p;
+    renderMySquadSelection();
 }
 
 function setCaptain(name) {
@@ -2133,45 +2300,40 @@ function updateSquadUI() {
       e.classList.add("checked");
     else e.classList.remove("checked");
   });
-  document.querySelectorAll(".impact-card").forEach((e) => {
-    if (mySelectedImpact && e.innerHTML.includes(mySelectedImpact.name))
-      e.classList.add("checked");
-    else e.classList.remove("checked");
-  });
 
-  const fCount = countForeigners(mySelectedSquad11);
+  const fCount = countForeigners(mySelectedSquad);
   const fColor = fCount > 4 ? "text-danger" : "text-white-50";
-  const wkCount = countKeepers(mySelectedSquad11);
+  const wkCount = countKeepers(mySelectedSquad);
   const wkColor = wkCount < 1 ? "text-danger" : "text-white-50";
 
-  document.getElementById(
-    "p11Count"
-  ).innerText = `${mySelectedSquad11.length}/11 Selected`;
-  document.getElementById(
-    "foreignCountDisplay"
-  ).innerHTML = `<span class="${fColor}">Foreign: ${fCount}/4</span>`;
-  document.getElementById(
-    "wkCountDisplay"
-  ).innerHTML = `<span class="${wkColor}">WK: ${wkCount}/1</span>`;
-  document.getElementById("impactCount").innerText = `${
-    mySelectedImpact ? 1 : 0
-  }/1 Selected`;
+  document.getElementById("p11Count").innerText = `${mySelectedSquad.length}/12 Selected`;
+  document.getElementById("foreignCountDisplay").innerHTML = `<span class="${fColor}">Foreign: ${fCount}/4</span>`;
+  document.getElementById("wkCountDisplay").innerHTML = `<span class="${wkColor}">WK: ${wkCount}/1</span>`;
+  
+  // Impact Count Display Update
+  const impactReady = myBattingImpact && myBowlingImpact;
+  document.getElementById("impactCount").innerHTML = impactReady 
+      ? "<span class='text-success'>Roles Set</span>" 
+      : "<span class='text-danger'>Select Batsman & Bowler Impact</span>";
 
   const isValid =
-    mySelectedSquad11.length === 11 &&
-    mySelectedImpact &&
-    wkCount >= 1 &&
+    mySelectedSquad.length === 12 &&
+    myBattingImpact &&
+    myBowlingImpact &&
     mySelectedCaptain;
   document.getElementById("submitSquadBtn").disabled = !isValid;
 }
 
 document.getElementById("submitSquadBtn").addEventListener("click", () => {
-  socket.emit("submit_squad", {
+    // Ensure removal of old listener if any (though usually one-shot)
+    socket.emit("submit_squad", {
     teamKey: mySelectedTeamKey,
-    playing11: mySelectedSquad11,
-    impact: mySelectedImpact,
+    squad: mySelectedSquad,
+    batImpact: myBattingImpact,
+    bowlImpact: myBowlingImpact,
     captain: mySelectedCaptain,
   });
+
   document.getElementById("submitSquadBtn").innerHTML =
     "SUBMITTED <i class='bi bi-check'></i>";
   document.getElementById("submitSquadBtn").disabled = true;
@@ -2239,89 +2401,15 @@ socket.on("tournamentComplete", (results) => {
     results.standings = arr.sort((a, b) => b.stats.pts - a.stats.pts);
   }
 
-  lastTournamentData = results;
-  document
-    .getElementById("squadSelectionScreen")
-    .classList.remove("overlay-active");
-  document.getElementById("squadSelectionScreen").style.display = "none";
-  const resScreen = document.getElementById("resultsScreen");
-  resScreen.style.display = "block";
-  resScreen.style.opacity = "1";
-  resScreen.style.pointerEvents = "auto";
-  resScreen.style.zIndex = "2000";
-
-  const winnerText =
-    typeof results.champion === "string" ? results.champion : results.winner;
-  document.getElementById("winnerName").innerText = winnerText || "Unknown";
-  document.getElementById("runnerName").innerText =
-    results.runnerUp || "Runner Up";
-
-  document.getElementById("resOrange").innerText = results.orangeCap.name;
-  document.getElementById(
-    "resOrangeStat"
-  ).innerText = `${results.orangeCap.runs} Runs`;
-  document.getElementById("resPurple").innerText = results.purpleCap.name;
-  document.getElementById(
-    "resPurpleStat"
-  ).innerText = `${results.purpleCap.wkts} Wkts`;
-  document.getElementById("resMvp").innerText = results.mvp.name;
-  document.getElementById("resMvpStat").innerText = `${results.mvp.pts} Pts`;
-
-
-function renderLeaderboard(results) {
-  const ptBody = document.getElementById("pointsTableBody");
-  ptBody.innerHTML = "";
-
-  if (results.standings) {
-    results.standings.forEach((t, i) => {
-      const s = normalizeTeamStats(t);
-      let row = `<tr><td>${i + 1}</td><td><div class="d-flex align-items-center"><div class="logo-box me-2" style="font-size:1rem;padding:2px 8px;">${
-        t.logo || t.name.substring(0, 2).toUpperCase()
-      }</div>${s.name}</div></td><td class="text-center">${
-        s.p
-      }</td><td class="text-center text-success">${
-        s.w
-      }</td><td class="text-center text-danger">${
-        s.l
-      }</td><td class="text-center fw-bold">${
-        s.nrr
-      }</td><td class="text-center fw-bold text-warning">${
-        s.pts
-      }</td></tr>`;
-      ptBody.innerHTML += row;
-    });
-  }
-}
-
-  renderLeaderboard(results);
-
-  // --- POPULATE FILTER DROPDOWN ---
-  const select = document.getElementById("matchFilterTeam");
-  select.innerHTML = '<option value="ALL">ALL TEAMS</option>';
-  if (results.standings) {
-      results.standings.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
-          select.innerHTML += `<option value="${t.name}">${t.name}</option>`;
-      });
-  }
-
-  // Render initial view (All Matches)
-  filterMatchLogs("ALL");
-
-  const tree = document.getElementById("playoffTree");
-  tree.innerHTML = "";
-  if (results.playoffs.length > 0) {
-    results.playoffs.forEach(
-      (m, i) => (tree.innerHTML += createMatchCard(m, true, i))
-    );
-  } else {
-    tree.innerHTML = `<div class='text-center text-white'>Final: ${
-      results.final || "Played"
-    }</div>`;
-  }
-
-  renderAllTeams(results.allTeamsData);
-  speakText("Simulation Complete. The winner is " + winnerText);
+  // Save results to session storage for play.html to pick up
+  sessionStorage.setItem("IPL_RESULTS", JSON.stringify(results));
+  sessionStorage.setItem("currentRoomId", myRoomId);
+  
+  // Redirect to play.html
+  window.location.href = `play.html?room=${myRoomId}`;
 });
+
+
 
 // --- MATCH FILTER LOGIC ---
 window.filterMatchLogs = function(teamName) {
@@ -2432,97 +2520,18 @@ function openScorecard(type, index) {
       ? lastTournamentData.leagueMatches[index]
       : lastTournamentData.playoffs[index];
   
-  if (!matchData) return;
-  
-  // Guard: If matchData is mangled
-  if (typeof matchData !== 'object' || !matchData.t1 || !matchData.t2) {
-      console.error("Invalid match data", matchData);
+  if (!matchData) {
+      console.error("Match data not found for", type, index);
       return;
   }
-
-  if (!matchData.details) {
-     const modalBody = document.getElementById("detailedScorecardContent");
-     modalBody.innerHTML = "<div class='p-4 text-white text-center'>Detailed scorecard not generated for this match.</div>";
-     const modal = new bootstrap.Modal(document.getElementById("scorecardModal"));
-     modal.show();
-     return;
-  }
-
-  // 2. Prepare Modal Content
-  const d = matchData.details;
-  const modalBody = document.getElementById("detailedScorecardContent");
   
-  // Helper to render one innings table
-  const renderInningsTable = (inn, title) => {
-      let batRows = "";
-      inn.bat.forEach(b => {
-          batRows += `
-          <tr style="border-bottom: 1px solid #333;">
-            <td class="text-white">${b.name || b.player || "Unknown"} ${b.status === "not out" ? "*" : ""}</td>
-            <td class="text-end fw-bold text-warning">${b.runs}</td>
-            <td class="text-end text-white-50">${b.balls}</td>
-            <td class="text-end text-white-50">${b.fours}</td>
-            <td class="text-end text-white-50">${b.sixes}</td>
-            <td class="text-end text-white-50">${b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(0) : "0"}</td>
-          </tr>`;
-      });
-
-      let bowlRows = "";
-      inn.bowl.forEach(b => {
-          bowlRows += `
-          <tr style="border-bottom: 1px solid #333; ${b.wkts >= 3 ? 'background: rgba(138, 43, 226, 0.15);' : ''}">
-            <td class="text-white">${b.name || b.player || "Unknown"}</td>
-            <td class="text-end text-white-50">${b.oversDisplay || formatOver(b.balls)}</td>
-            <td class="text-end text-white-50">${b.runs}</td>
-            <td class="text-end fw-bold ${b.wkts >= 3 ? 'text-warning' : 'text-info'}">${b.wkts}</td>
-            <td class="text-end text-white-50">${b.economy}</td>
-          </tr>`;
-      });
-
-      return `
-        <div class="mb-4">
-            <div class="d-flex justify-content-between align-items-center bg-dark p-2 rounded mb-2">
-                <span class="text-success fw-bold">${title} (${inn.team})</span>
-                <span class="text-white fw-bold">${inn.score}/${inn.wickets} <small class="text-muted">(${inn.balls} balls)</small></span>
-            </div>
-            
-            <h6 class="text-white-50 small mt-2">BATTING</h6>
-            <table class="table table-borderless table-sm small mb-3">
-                <thead class="text-secondary" style="font-size: 0.75rem;"><tr><th>Batter</th><th class="text-end">R</th><th class="text-end">B</th><th class="text-end">4s</th><th class="text-end">6s</th><th class="text-end">SR</th></tr></thead>
-                <tbody>${batRows}</tbody>
-            </table>
-
-            <h6 class="text-white-50 small mt-2">BOWLING</h6>
-            <table class="table table-borderless table-sm small">
-                 <thead class="text-secondary" style="font-size: 0.75rem;"><tr><th>Bowler</th><th class="text-end">O</th><th class="text-end">R</th><th class="text-end">W</th><th class="text-end">ER</th></tr></thead>
-                <tbody>${bowlRows}</tbody>
-            </table>
-            ${inn.ballLog ? `<div class="text-center mt-2"><button class="btn btn-xs btn-outline-secondary" onclick="alert('Ball-by-ball log available in console due to UI space limit.')">View Ball Log in Console</button></div>` : ""}
-        </div>
-      `;
-  };
-
-  modalBody.innerHTML = `
-    <div class="modal-header border-0 bg-dark">
-        <h5 class="modal-title w-100 text-center text-warning">${matchData.t1} vs ${matchData.t2}</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-    </div>
-    <div class="modal-body bg-black" style="max-height: 80vh; overflow-y: auto;">
-        ${renderInningsTable(d.i1, "1st Innings")}
-        ${renderInningsTable(d.i2, "2nd Innings")}
-    </div>
-    <div class="modal-footer border-0 bg-dark justify-content-center">
-        <span class="text-success fw-bold text-uppercase">${matchData.winnerName} WON BY ${matchData.margin.toUpperCase()}</span>
-    </div>
-  `;
-
-  // 3. Show Modal
-  if (d.i1.ballLog) console.log("Innings 1 Log:", d.i1.ballLog);
-  if (d.i2.ballLog) console.log("Innings 2 Log:", d.i2.ballLog);
-
-  const modalEl = document.getElementById("scorecardModal");
-  const modal = new bootstrap.Modal(modalEl);
-  modal.show();
+  // 2. Delegate to the global UI renderer (defined in play.html)
+  if (typeof window.showScorecard === 'function') {
+      window.showScorecard(matchData);
+  } else {
+      console.error("showScorecard function not found!");
+      alert("Error: Scorecard viewer not loaded.");
+  }
 }
 
 
@@ -2584,6 +2593,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, 4500);
 
+  // Pre-fill player name if stored
+  if (myPlayerName) {
+    const createNameInput = document.getElementById("createPlayerName");
+    const joinNameInput = document.getElementById("joinPlayerName");
+    if (createNameInput) createNameInput.value = myPlayerName;
+    if (joinNameInput) joinNameInput.value = myPlayerName;
+  }
+
   if (
     localStorage.getItem("ipl_last_room") &&
     localStorage.getItem("ipl_last_pass")
@@ -2594,3 +2611,185 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("joinPass").value = p;
   }
 });
+
+
+/* =========================================
+   AUTO TEST FEATURE (SKIP AUCTION)
+   ========================================= */
+
+const AUTO_RCB_NAMES = ["Virat Kohli", "Faf du Plessis", "Rajat Patidar", "Suyash Prabhudessai", "Dinesh Karthik", "Anuj Rawat", "Glenn Maxwell", "Will Jacks", "Cameron Green", "Mahipal Lomror", "Mohammed Siraj", "Reece Topley", "Akash Deep"];
+const AUTO_CSK_NAMES = ["Ruturaj Gaikwad", "Devon Conway", "Ajinkya Rahane", "Sameer Rizvi", "MS Dhoni", "Ravindra Jadeja", "Moeen Ali", "Shivam Dube", "Rachin Ravindra", "Matheesha Pathirana", "Maheesh Theekshana", "Tushar Deshpande"];
+
+function getPlayerForTest(name) {
+    const db = PLAYER_DATABASE[name] || { bat: 75, bowl: 75, luck: 75, type: 'bat' }; // fallback stats
+    
+    let region = "Indian"; 
+    let roleKey = db.type || 'bat';
+
+    // Determine Region (Foreign/Indian) from RAW_DATA
+    for (const cat in RAW_DATA) {
+        if (RAW_DATA[cat].foreign && RAW_DATA[cat].foreign.includes(name)) region = "Foreign";
+        if (RAW_DATA[cat].indian && RAW_DATA[cat].indian.includes(name)) region = "Indian";
+        
+        // Also check if role matches category loose check
+        if(RAW_DATA[cat].foreign && RAW_DATA[cat].foreign.includes(name) || RAW_DATA[cat].indian && RAW_DATA[cat].indian.includes(name)) {
+             if(cat.toLowerCase().includes('keep')) roleKey = 'wk';
+             else if(cat.toLowerCase().includes('round')) roleKey = 'ar';
+             else if(cat.toLowerCase().includes('bowl')) roleKey = 'bowl';
+             else roleKey = 'bat';
+        }
+    }
+    
+    // Override roleKey from DB if explicit
+    if(db.type) roleKey = db.type;
+
+    return {
+        name: name,
+        price: 10000000, // Dummy price
+        roleKey: roleKey,
+        playerType: region, 
+        stats: db,
+        cat: roleKey.toUpperCase(),
+        set: 1
+    };
+}
+
+document.getElementById("autoTestBtn")?.addEventListener("click", () => {
+    if (!isAdmin) {
+        alert("Only Host can run auto test.");
+        return;
+    }
+    
+    if(!confirm("⚠️ FORCE SKIP to Squad Selection with Auto-Filled Teams?\n(This skips the auction completely)")) return;
+
+    const rcbRoster = AUTO_RCB_NAMES.map(name => getPlayerForTest(name));
+    const cskRoster = AUTO_CSK_NAMES.map(name => getPlayerForTest(name));
+
+    socket.emit("admin_auto_test", { rcb: rcbRoster, csk: cskRoster });
+});
+function formatOver(balls) {
+    if (!balls) return "0.0";
+    const o = Math.floor(balls / 6);
+    const b = balls % 6;
+    return `${o}.${b}`;
+}
+window.formatOver = formatOver;
+
+// ======================================================
+// 💬 LIVE CHAT SYSTEM
+// ======================================================
+
+// Send Chat Message
+function sendChatMessage() {
+  const input = document.getElementById("chatInput");
+  const message = input.value.trim();
+  
+  if (!message) return;
+  if (!myPlayerName) {
+    // Alert user to enter name first
+    alert("Please enter your name first before chatting!");
+    const nameSection = document.getElementById("nameEntrySection");
+    if (nameSection) {
+      nameSection.style.display = "block";
+      const nameInput = document.getElementById("lobbyPlayerName");
+      if (nameInput) nameInput.focus();
+    }
+    input.value = "";
+    return;
+  }
+  
+  // Emit chat message to server
+  socket.emit("chat_message", {
+    playerName: myPlayerName,
+    message: message,
+    timestamp: Date.now()
+  });
+  
+  // Clear input
+  input.value = "";
+}
+
+// Receive Chat Message
+socket.off("chat_message");
+socket.on("chat_message", (data) => {
+  const chatContainer = document.getElementById("chatMessages");
+  if (!chatContainer) return;
+  
+  // Create message element
+  const messageDiv = document.createElement("div");
+  messageDiv.className = "chat-message";
+  
+  messageDiv.innerHTML = `
+    <div class="chat-name">${escapeHtml(data.playerName)}:</div>
+    <div class="chat-text">${escapeHtml(data.message)}</div>
+  `;
+  
+  chatContainer.appendChild(messageDiv);
+  
+  // Auto-scroll to bottom
+  chatContainer.scrollTop = chatContainer.scrollHeight;
+});
+
+// Send button click
+document.addEventListener("DOMContentLoaded", () => {
+  const sendBtn = document.getElementById("sendChatBtn");
+  const chatInput = document.getElementById("chatInput");
+  
+  if (sendBtn) {
+    sendBtn.addEventListener("click", sendChatMessage);
+  }
+  
+  if (chatInput) {
+    // Send on Enter key
+    chatInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
+  
+  // Name Entry System
+  const lobbyPlayerName = document.getElementById("lobbyPlayerName");
+  
+  if (lobbyPlayerName) {
+    const submitName = () => {
+      const name = lobbyPlayerName.value.trim();
+      if (!name) {
+        // Just return if empty, no alert
+        return;
+      }
+      
+      // Store name
+      myPlayerName = name;
+      sessionStorage.setItem("ipl_auction_player_name", name);
+      
+      // Hide name entry section
+      document.getElementById("nameEntrySection").style.display = "none";
+      
+      // Send name to server
+      socket.emit("update_player_name", { playerName: name });
+      
+      // Show success message
+      logEvent(`✅ Welcome, ${name}!`, true);
+    };
+    
+    // Enter key support
+    lobbyPlayerName.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitName();
+      }
+    });
+  }
+});
+
+// Show name entry section if no name is set
+function checkAndShowNameEntry() {
+  if (!myPlayerName) {
+    const nameSection = document.getElementById("nameEntrySection");
+    if (nameSection) {
+      nameSection.style.display = "block";
+    }
+  }
+}
